@@ -48,14 +48,18 @@ function readBody(req) {
 
 function progressMap(course) {
   const map = {};
-  for (const row of store.getProgress(course)) map[row.unit] = row.state;
+  for (const row of store.getProgress(course)) map[row.unit] = row;
   return map;
 }
 
 function coursesWithProgress() {
   return content.listCourses().map(({ slug, meta, units }) => {
     const pm = progressMap(slug);
-    const u = units.map(x => ({ ...x, state: pm[x.file] || 'unread' }));
+    const u = units.map(x => ({
+      ...x,
+      state: pm[x.file] ? pm[x.file].state : 'unread',
+      updatedAt: pm[x.file] ? pm[x.file].updated_at : null,
+    }));
     return {
       slug,
       title: meta.title || slug,
@@ -139,8 +143,8 @@ async function handleApi(req, res, url) {
       course, unit, md,
       courseTitle: meta.title || course,
       questions: questions.map(({ id, question }) => ({ id, question })), // keywords 不外流
-      units: units.map(u => ({ ...u, state: pm[u.file] || 'unread' })),
-      state: pm[unit] || 'unread',
+      units: units.map(u => ({ ...u, state: pm[u.file] ? pm[u.file].state : 'unread' })),
+      state: pm[unit] ? pm[unit].state : 'unread',
     });
   }
 
