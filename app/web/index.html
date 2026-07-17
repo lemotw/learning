@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>學習中心</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/vendor/cytoscape.min.js"></script>
+</head>
+<body>
+<div class="topbar">
+  <b>學習中心</b>
+  <span class="dim">點課程節點展開單元;點單元進講義</span>
+  <span class="spacer"></span>
+  <span class="dim" id="stats"></span>
+</div>
+
+<div class="home">
+  <div id="cy"></div>
+  <aside class="sidebar">
+    <h3>進行中課程</h3>
+    <div id="courseList"></div>
+    <h3>待回爐</h3>
+    <div id="redoList"></div>
+    <h3>最近學習記錄</h3>
+    <div id="recList"></div>
+  </aside>
+</div>
+
+<script>
+const STATE_COLOR = { unread: '#3a4356', reading: '#e0a458', done: '#4caf7d' };
+const STATUS_COLOR = { draft: '#5a6378', generating: '#8b93a7', active: '#7c6ff0', done: '#4caf7d', archived: '#3a4356' };
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+const readerUrl = (c, u) => `/reader.html?course=${encodeURIComponent(c)}&unit=${encodeURIComponent(u)}`;
+
+async function main() {
+  const [graph, records, redo] = await Promise.all([
+    fetch('/api/graph').then(r => r.json()),
+    fetch('/api/records?limit=12').then(r => r.json()),
+    fetch('/api/redo').then(r => r.json()),
+  ]);
+
+  // ---- 側欄 ----
+  const totalDone = graph.nodes.reduce((s, n) => s + n.done, 0);
+  const totalUnits = graph.nodes.reduce((s, n) => s + n.total, 0);
+  document.getElementById('stats').textContent = `${graph.nodes.length} 門課 · ${totalDone}/${totalUnits} 單元完成`;
+
+  document.getElementById('courseList').innerHTML = graph.nodes
+    .filter(n => n.status !== 'archived')
+    .map(n => {
+      const pct = n.total ? Math.round(n.done / n.total * 100) : 0;
+      const next = n.units.find(u => u.state !== 'done');
+      return `<div class="course-item">
+        <div style="display:flex;justify-content:space-between">
+          <b>${esc(n.title)}</b><span class="dim">${n.done}/${n.total}</span>
+        </div>
+        ${next ? `<a href="${readerUrl(n.id, next.file)}" class="dim">繼續:${esc(next.title)}</a>` : '<span class="dim">✔ 全部完成</span>'}
+        <div class="bar"><i style="width:${pct}%"></i></div>
+      </div>`;
+    }).join('') || '<div class="dim">還沒有課程——用 /new-course 開一門</div>';
+
+  document.getElementById('redoList').innerHTML = redo.map(r =>
+    `<div class="rec"><b>${esc(r.course)}</b> / ${esc(r.unit.replace('.md',''))} · ${esc(r.question_id)}
+     <a href="${readerUrl(r.course, r.unit)}#selfcheck">去重答</a></div>`
+  ).join('') || '<div class="dim">沒有待回爐的題目</div>';
+
+  const KIND = { read: '閱讀', selfcheck: '自答', chat: '對話', lab: 'Lab' };
+  document.getElementById('recList').innerHTML = records.map(r =>
+    `<div class="rec">${new Date(r.ts).toLocaleString('zh-TW', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+     · <b>${esc(r.course)}</b>${r.unit ? ' / ' + esc(r.unit.replace('.md','')) : ''}
+     · ${KIND[r.kind] || esc(r.kind)}${r.note ? ' — ' + esc(r.note) : ''}</div>`
+  ).join('') || '<div class="dim">尚無記錄</div>';
+
+  // ---- 關聯圖 ----
+  const elements = [];
+  for (const n of graph.nodes) {
+    const pct = n.total ? n.done / n.total : 0;
+    elements.push({ data: { id: n.id, label: `${n.title}\n${n.done}/${n.total}`, kind: 'course',
+      color: STATUS_COLOR[n.status] || STATUS_COLOR.active, size: 46 + n.total * 3, pct } });
+  }
+  for (const e of graph.edges) {
+    elements.push({ data: { id: `${e.source}->${e.target}`, source: e.source, target: e.target,
+      type: e.type, why: e.why, kind: 'rel' } });
+  }
+
+  const cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements,
+    style: [
+      { selector: 'node[kind="course"]', style: {
+        'label': 'data(label)', 'text-wrap': 'wrap', 'text-valign': 'center', 'color': '#d8dee9',
+        'font-size': 12, 'text-outline-width': 2, 'text-outline-color': '#0f1117',
+        'width': 'data(size)', 'height': 'data(size)',
+        'background-color': '#1e2430', 'border-width': 4, 'border-color': 'data(color)',
+        'pie-size': '92%',
+        'pie-1-background-color': '#4caf7d', 'pie-1-background-size': 'mapData(pct, 0, 1, 0, 100)',
+        'pie-1-background-opacity': 0.35,
+      }},
+      { selector: 'node[kind="unit"]', style: {
+        'label': 'data(label)', 'text-wrap': 'wrap', 'text-max-width': 130, 'font-size': 10,
+        'color': '#8b93a7', 'text-valign': 'bottom', 'text-margin-y': 4,
+        'width': 16, 'height': 16, 'background-color': 'data(color)',
+      }},
+      { selector: 'edge[kind="rel"]', style: {
+        'width': 2, 'line-color': '#4fb3bf', 'line-style': 'dashed', 'curve-style': 'bezier',
+        'target-arrow-shape': 'none', 'opacity': .7,
+      }},
+      { selector: 'edge[kind="rel"][type="prereq"]', style: {
+        'line-style': 'solid', 'line-color': '#7c6ff0', 'target-arrow-shape': 'triangle', 'target-arrow-color': '#7c6ff0',
+      }},
+      { selector: 'edge[kind="unitlink"]', style: { 'width': 1, 'line-color': '#2a3140', 'curve-style': 'bezier' } },
+    ],
+    layout: { name: 'cose', animate: false, padding: 60 },
+    wheelSensitivity: 0.2,
+  });
+
+  const nodesById = Object.fromEntries(graph.nodes.map(n => [n.id, n]));
+  const expanded = new Set();
+
+  cy.on('tap', 'node[kind="course"]', (ev) => {
+    const id = ev.target.id();
+    if (expanded.has(id)) {           // 收合
+      cy.remove(cy.nodes(`[parentCourse="${id}"]`));
+      expanded.delete(id);
+      return;
+    }
+    const n = nodesById[id];
+    const eles = [];
+    n.units.forEach((u, i) => {
+      const uid = `${id}::${u.file}`;
+      eles.push({ data: { id: uid, label: u.title.replace(/^Unit \d+[::]\s*/, ''), kind: 'unit',
+        color: STATE_COLOR[u.state] || STATE_COLOR.unread, parentCourse: id, course: id, file: u.file } });
+      eles.push({ data: { id: `${uid}-e`, source: id, target: uid, kind: 'unitlink', parentCourse: id } });
+    });
+    cy.add(eles);
+    cy.layout({ name: 'cose', animate: true, animationDuration: 400, padding: 60, randomize: false }).run();
+    expanded.add(id);
+  });
+
+  cy.on('tap', 'node[kind="unit"]', (ev) => {
+    const d = ev.target.data();
+    location.href = readerUrl(d.course, d.file);
+  });
+
+  cy.on('tap', 'edge[kind="rel"]', (ev) => {
+    const d = ev.target.data();
+    if (d.why) alert(`${d.source} → ${d.target}(${d.type})\n${d.why}`);
+  });
+}
+main();
+</script>
+</body>
+</html>

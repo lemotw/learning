@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>講義</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/vendor/highlight-github-dark.min.css">
+<script src="/vendor/markdown-it.min.js"></script>
+<script src="/vendor/highlight.min.js"></script>
+<script src="/vendor/mermaid.min.js"></script>
+</head>
+<body>
+<div class="topbar">
+  <a href="/">← 課程圖</a>
+  <span id="crumb" class="dim"></span>
+  <span class="spacer"></span>
+  <span class="dim">狀態:</span>
+  <button data-state="unread">未讀</button>
+  <button data-state="reading">閱讀中</button>
+  <button data-state="done">完成</button>
+  <span style="width:12px"></span>
+  <button id="prevBtn">上一單元</button>
+  <button id="nextBtn">下一單元</button>
+  <button id="chatToggle">💬 助教</button>
+</div>
+
+<div class="layout">
+  <div class="content">
+    <article id="md" class="md"></article>
+    <section id="selfcheck" class="md" style="padding-top:0"></section>
+  </div>
+
+  <aside class="chatpanel collapsed" id="chatpanel">
+    <header>
+      <b>單元助教</b>
+      <span class="dim" style="flex:1">知道你的診斷弱點與本單元內容</span>
+      <button id="newChat" title="開新對話">＋新對話</button>
+    </header>
+    <div class="chatlog" id="chatlog"></div>
+    <div class="chatinput">
+      <textarea id="chatText" placeholder="問這份講義的任何問題…(Enter 送出,Shift+Enter 換行)"></textarea>
+      <button class="primary" id="chatSend">送出</button>
+    </div>
+  </aside>
+</div>
+
+<script>
+const qs = new URLSearchParams(location.search);
+const course = qs.get('course'), unit = qs.get('unit');
+const mdi = window.markdownit({ html: false, linkify: true, breaks: false,
+  highlight: (str, lang) => {
+    if (lang === 'mermaid') return '<div class="mermaid">' + str.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>';
+    if (lang && hljs.getLanguage(lang)) { try { return hljs.highlight(str, { language: lang }).value; } catch {} }
+    return '';
+  }});
+mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+
+let unitData = null;
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error((await r.json().catch(()=>({}))).error || r.status);
+  return r.json();
+}
+
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+async function load() {
+  unitData = await api(`/api/unit?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
+  document.title = unitData.courseTitle + ' · ' + unit;
+  document.getElementById('crumb').textContent = unitData.courseTitle + ' / ' + unit.replace(/\.md$/, '');
+  document.getElementById('md').innerHTML = mdi.render(unitData.md);
+  mermaid.run({ querySelector: '#md .mermaid' }).catch(()=>{});
+  renderStateButtons(unitData.state);
+  setupNav();
+  renderSelfcheck();
+  loadChatHistory();
+}
+
+function renderStateButtons(state) {
+  document.querySelectorAll('.topbar [data-state]').forEach(b => {
+    b.classList.toggle('active', b.dataset.state === state);
+    b.onclick = async () => {
+      await api('/api/progress', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ course, unit, state: b.dataset.state }) });
+      renderStateButtons(b.dataset.state);
+    };
+  });
+}
+
+function setupNav() {
+  const files = unitData.units.map(u => u.file);
+  const i = files.indexOf(unit);
+  const go = f => location.href = `/reader.html?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(f)}`;
+  const prev = document.getElementById('prevBtn'), next = document.getElementById('nextBtn');
+  prev.disabled = i <= 0; next.disabled = i < 0 || i >= files.length - 1;
+  prev.onclick = () => go(files[i-1]); next.onclick = () => go(files[i+1]);
+}
+
+// ---------- 自答題 ----------
+async function renderSelfcheck() {
+  const el = document.getElementById('selfcheck');
+  if (!unitData.questions.length) return;
+  const attempts = await api(`/api/selfcheck?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
+  el.innerHTML = '<h2>自答題(AI 批改)</h2><p class="dim">用自己的話、90 秒能講完的量。批改後才會顯示必含概念。</p>';
+  for (const q of unitData.questions) {
+    const hist = attempts.filter(a => a.question_id === q.id);
+    const last = hist[hist.length - 1];
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div><b>${esc(q.question)}</b></div>
+      ${last ? `<div class="dim">上次:<span class="verdict-${last.verdict}">${last.verdict === 'pass' ? '通過' : '回爐'}</span> · ${new Date(last.ts).toLocaleString('zh-TW')} · 共 ${hist.length} 次</div>` : ''}
+      <textarea rows="4" placeholder="作答…"></textarea>
+      <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+        <button class="primary">送出批改</button>
+        ${hist.length ? '<button class="histBtn">歷次作答</button>' : ''}
+        <span class="result dim"></span>
+      </div>
+      <div class="feedback"></div>`;
+    const ta = card.querySelector('textarea');
+    const btn = card.querySelector('button.primary');
+    const result = card.querySelector('.result');
+    const fb = card.querySelector('.feedback');
+    btn.onclick = async () => {
+      if (!ta.value.trim()) return;
+      btn.disabled = true; result.textContent = '批改中…(本機 claude,約 10-30 秒)'; result.className = 'result thinking';
+      try {
+        const g = await api('/api/selfcheck', { method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ course, unit, qid: q.id, answer: ta.value }) });
+        result.className = 'result';
+        result.innerHTML = `<span class="verdict-${g.verdict}">${g.verdict === 'pass' ? '✔ 通過' : '↻ 回爐'}</span>`;
+        fb.innerHTML = `<div class="card" style="margin-bottom:0">
+          <div>${esc(g.feedback)}</div>
+          ${g.missing && g.missing.length ? `<div class="dim" style="margin-top:6px">沒講到:${g.missing.map(esc).join('、')}</div>` : ''}
+          <div style="margin-top:6px">必含概念:${g.keywords.map(k => `<span class="kw">${esc(k)}</span>`).join('')}</div>
+        </div>`;
+      } catch (e) { result.className = 'result'; result.textContent = '批改失敗:' + e.message; }
+      btn.disabled = false;
+    };
+    const hb = card.querySelector('.histBtn');
+    if (hb) hb.onclick = () => {
+      fb.innerHTML = hist.map(a => `<div class="card" style="margin-bottom:6px">
+        <div class="dim">${new Date(a.ts).toLocaleString('zh-TW')} · <span class="verdict-${a.verdict}">${a.verdict}</span></div>
+        <div style="white-space:pre-wrap">${esc(a.answer)}</div>
+        ${a.feedback ? `<div class="dim" style="margin-top:4px">${esc(a.feedback)}</div>` : ''}
+      </div>`).join('');
+    };
+    el.appendChild(card);
+  }
+}
+
+// ---------- 助教對話 ----------
+const chatlog = document.getElementById('chatlog');
+const panel = document.getElementById('chatpanel');
+document.getElementById('chatToggle').onclick = () => panel.classList.toggle('collapsed');
+
+function addMsg(role, text) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + role;
+  d.innerHTML = `<div class="who">${role === 'user' ? '你' : '助教'}</div><div class="bubble"></div>`;
+  setMsgText(d, text, role);
+  chatlog.appendChild(d);
+  chatlog.scrollTop = chatlog.scrollHeight;
+  return d;
+}
+function setMsgText(el, text, role) {
+  const b = el.querySelector('.bubble');
+  if (role === 'assistant') b.innerHTML = mdi.render(text);
+  else b.textContent = text;
+}
+
+async function loadChatHistory() {
+  try {
+    const h = await api(`/api/chat/history?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
+    for (const m of h.messages) addMsg(m.role, m.content);
+    if (h.messages.length) panel.classList.remove('collapsed');
+  } catch {}
+}
+
+let sending = false;
+let nextNewSession = false;
+async function sendChat() {
+  const ta = document.getElementById('chatText');
+  const text = ta.value.trim();
+  if (!text || sending) return;
+  const newSession = nextNewSession; nextNewSession = false;
+  sending = true; ta.value = '';
+  addMsg('user', text);
+  const holder = addMsg('assistant', '');
+  holder.querySelector('.bubble').innerHTML = '<span class="thinking">思考中…</span>';
+  let acc = '';
+  try {
+    const r = await fetch('/api/chat', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ course, unit, message: text, newSession }) });
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const ev = (chunk.match(/^event: (.+)$/m) || [])[1];
+        const dataLine = (chunk.match(/^data: (.+)$/m) || [])[1];
+        if (!ev || !dataLine) continue;
+        const data = JSON.parse(dataLine);
+        if (ev === 'delta') { acc += data.text; setMsgText(holder, acc, 'assistant'); chatlog.scrollTop = chatlog.scrollHeight; }
+        if (ev === 'done') { setMsgText(holder, data.text || acc, 'assistant'); }
+        if (ev === 'error') { setMsgText(holder, '⚠ ' + data.error, 'assistant'); }
+      }
+    }
+  } catch (e) { setMsgText(holder, '⚠ ' + e.message, 'assistant'); }
+  sending = false;
+  chatlog.scrollTop = chatlog.scrollHeight;
+}
+
+document.getElementById('chatSend').onclick = () => sendChat();
+document.getElementById('chatText').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
+document.getElementById('newChat').onclick = () => {
+  chatlog.innerHTML = '';
+  nextNewSession = true;
+  const ta = document.getElementById('chatText');
+  ta.placeholder = '新對話——第一則訊息會重新載入講義 context';
+  ta.focus();
+};
+
+load().catch(e => { document.getElementById('md').textContent = '載入失敗:' + e.message; });
+</script>
+</body>
+</html>
