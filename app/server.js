@@ -257,7 +257,10 @@ function serveStatic(req, res, url) {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     return res.end('not found');
   }
-  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+  const ext = path.extname(file);
+  const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
+  if (ext === '.html') headers['Cache-Control'] = 'no-store'; // 頁面永遠拿最新版
+  res.writeHead(200, headers);
   fs.createReadStream(file).pipe(res);
 }
 

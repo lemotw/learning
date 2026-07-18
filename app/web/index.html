@@ -347,7 +347,8 @@ async function load() {
   }
 }
 
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', () => load()); // 切頁順便重抓資料,避免顯示舊狀態
+window.addEventListener('pageshow', (e) => { if (e.persisted) load(); }); // 從 bfcache 返回也重抓
 
 document.addEventListener('click', async e => {
   const nav = e.target.closest('[data-nav]');
