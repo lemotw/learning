@@ -243,7 +243,7 @@ function detailHTML(slug) {
 
 function graphHTML() {
   return tabsHTML('graph') + `<div class="cy-wrap"><div id="cy"></div><div class="cy-tip" id="cyTip"></div></div>
-    <div class="graph-hint">實線箭頭 = 先修(prereq)、虛線 = 相關(related)、<span style="color:#d97706">橙色點線 = 自動候選(概念比對)</span>。點課程節點展開/收合單元;點單元進講義;滑過連線看關聯理由。</div>`;
+    <div class="graph-hint">虛線 = 相關(概念比對自動生成)、實線箭頭 = 先修(prereq,手動標註)。點課程節點展開/收合單元;點單元進講義;滑過連線看概念呼應。</div>`;
 }
 
 // ---------- 圖譜 ----------
@@ -292,9 +292,6 @@ function initGraph() {
       { selector: 'edge[kind="rel"][type="prereq"]', style: {
         'line-style': 'solid', 'line-color': accent, 'target-arrow-shape': 'triangle', 'target-arrow-color': accent,
       }},
-      { selector: 'edge[kind="rel"][origin="auto"]', style: {
-        'line-style': 'dotted', 'line-color': '#d97706', opacity: .55, width: 2,
-      }},
       { selector: 'edge[kind="unitlink"]', style: { 'width': 1, 'line-color': 'rgba(127,127,127,.35)', 'curve-style': 'bezier' } },
     ],
     layout: { name: 'cose', animate: false, padding: 60 },
@@ -331,13 +328,10 @@ function initGraph() {
   const TYPE_LABEL = { prereq: '先修', related: '相關', extends: '深入' };
   function showTip(ev) {
     const d = ev.target.data();
-    const badge = d.origin === 'auto'
-      ? `自動候選 · 相似度 ${Number(d.score).toFixed(3)}`
-      : (TYPE_LABEL[d.type] || esc(d.type));
+    const badge = (TYPE_LABEL[d.type] || esc(d.type)) + (d.score ? ` · 相似度 ${Number(d.score).toFixed(3)}` : '');
     tip.innerHTML = `<b>${esc(courseTitle(d.source))} ${d.type === 'prereq' ? '→' : '↔'} ${esc(courseTitle(d.target))}</b>
       <span class="dim">(${badge})</span>
-      ${d.why ? `<div class="why">${esc(d.why)}</div>` : ''}
-      ${d.origin === 'auto' ? `<div class="why">認可的話,把這條加進 meta.json 的 relations 即轉為正式邊</div>` : ''}`;
+      ${d.why ? `<div class="why">${esc(d.why)}</div>` : ''}`;
     const pos = ev.renderedPosition || (ev.target.midpoint && { x: ev.target.renderedMidpoint().x, y: ev.target.renderedMidpoint().y });
     const wrap = container.getBoundingClientRect();
     let x = (pos ? pos.x : wrap.width / 2) + 14;
