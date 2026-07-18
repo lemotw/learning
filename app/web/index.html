@@ -156,9 +156,7 @@
 <script>
 const CYCLE = { unread: 'reading', reading: 'done', done: 'unread' };
 const LABEL = { unread: '未讀', reading: '閱讀中', done: '已讀' };
-const KIND = { read: '閱讀', selfcheck: '自答', chat: '對話', lab: 'Lab' };
-
-let COURSES = [], RECORDS = [], REDO = [];
+let COURSES = [], REDO = [];
 let GRAPH = { edges: [] }; // /api/graph 的合併邊(手動 + 自動候選)
 let cy = null; // 圖譜 lazy init
 
@@ -220,15 +218,9 @@ function overviewHTML() {
     `<div class="rec"><span class="redo-badge">↻</span> <b>${esc(courseTitle(r.course))}</b> · ${esc(r.unit.replace('.md',''))} · ${esc(r.question_id)}
      <a href="${readerUrl(r.course, r.unit)}">去重答 →</a></div>`).join('');
 
-  const recRows = RECORDS.map(r =>
-    `<div class="rec">${new Date(r.ts).toLocaleString('zh-TW', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
-     · <b>${esc(courseTitle(r.course))}</b>${r.unit ? ' · ' + esc(r.unit.replace('.md','')) : ''}
-     · ${KIND[r.kind] || esc(r.kind)}${r.note ? ' — ' + esc(r.note) : ''}</div>`).join('');
-
   return tabsHTML('progress') + overallHTML()
     + `<div class="panel-list">${rows || '<div class="empty">還沒有課程——在專案裡跑 /new-course 開一門</div>'}</div>`
-    + (REDO.length ? `<h3 class="sec">待回爐</h3><div class="panel-list">${redoRows}</div>` : '')
-    + `<h3 class="sec">最近學習記錄</h3><div class="panel-list">${recRows || '<div class="empty">尚無記錄</div>'}</div>`;
+    + (REDO.length ? `<h3 class="sec">待回爐</h3><div class="panel-list">${redoRows}</div>` : '');
 }
 
 function courseTitle(slug) {
@@ -395,13 +387,12 @@ function render() {
 
 async function load() {
   try {
-    const [c, rec, redo, g] = await Promise.all([
+    const [c, redo, g] = await Promise.all([
       fetch('/api/courses', { cache: 'no-store' }).then(r => r.json()),
-      fetch('/api/records?limit=10', { cache: 'no-store' }).then(r => r.json()),
       fetch('/api/redo', { cache: 'no-store' }).then(r => r.json()),
       fetch('/api/graph', { cache: 'no-store' }).then(r => r.json()),
     ]);
-    COURSES = c; RECORDS = rec; REDO = redo; GRAPH = g;
+    COURSES = c; REDO = redo; GRAPH = g;
     render();
   } catch (e) {
     document.getElementById('view').innerHTML =
