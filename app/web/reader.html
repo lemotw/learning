@@ -4,18 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>講義</title>
-<link rel="stylesheet" href="/style.css">
-<link rel="stylesheet" href="/vendor/highlight-github-dark.min.css">
-<link rel="stylesheet" href="/vendor/katex/katex.min.css">
-<script src="/vendor/markdown-it.min.js"></script>
-<script src="/vendor/highlight.min.js"></script>
-<script src="/vendor/mermaid.min.js"></script>
-<script src="/vendor/katex/katex.min.js"></script>
-<script src="/vendor/katex/auto-render.min.js"></script>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="vendor/highlight-github-dark.min.css">
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
+<script src="vendor/markdown-it.min.js"></script>
+<script src="vendor/highlight.min.js"></script>
+<script src="vendor/mermaid.min.js"></script>
+<script src="vendor/katex/katex.min.js"></script>
+<script src="vendor/katex/auto-render.min.js"></script>
 </head>
 <body>
 <div class="topbar">
-  <a href="/">← 課程</a>
+  <a href="./">← 課程</a>
   <span id="crumb" class="dim crumb"></span>
   <span class="spacer"></span>
   <span class="dim hide-sm">狀態:</span>
@@ -72,7 +72,7 @@ async function api(path, opts) {
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
 
 async function load() {
-  unitData = await api(`/api/unit?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
+  unitData = await api(`api/unit?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
   document.title = unitData.courseTitle + ' · ' + unit;
   document.getElementById('crumb').textContent = unitData.courseTitle + ' / ' + unit.replace(/\.md$/, '');
   const mdEl = document.getElementById('md');
@@ -91,7 +91,7 @@ async function load() {
     const href = a.getAttribute('href');
     if (/^https?:/.test(href)) return;
     const file = href.split('/').pop();
-    a.href = `/reader.html?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(file)}`;
+    a.href = `reader.html?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(file)}`;
   });
   renderStateButtons(unitData.state);
   setupNav();
@@ -103,7 +103,7 @@ function renderStateButtons(state) {
   document.querySelectorAll('.topbar [data-state]').forEach(b => {
     b.classList.toggle('active', b.dataset.state === state);
     b.onclick = async () => {
-      await api('/api/progress', { method: 'POST', headers: {'Content-Type':'application/json'},
+      await api('api/progress', { method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ course, unit, state: b.dataset.state }) });
       renderStateButtons(b.dataset.state);
     };
@@ -113,7 +113,7 @@ function renderStateButtons(state) {
 function setupNav() {
   const files = unitData.units.map(u => u.file);
   const i = files.indexOf(unit);
-  const go = f => location.href = `/reader.html?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(f)}`;
+  const go = f => location.href = `reader.html?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(f)}`;
   const prev = document.getElementById('prevBtn'), next = document.getElementById('nextBtn');
   prev.disabled = i <= 0; next.disabled = i < 0 || i >= files.length - 1;
   prev.onclick = () => go(files[i-1]); next.onclick = () => go(files[i+1]);
@@ -123,7 +123,7 @@ function setupNav() {
 async function renderSelfcheck() {
   const el = document.getElementById('selfcheck');
   if (!unitData.questions.length) return;
-  const attempts = await api(`/api/selfcheck?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
+  const attempts = await api(`api/selfcheck?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
   el.innerHTML = '<h2>自答題(AI 批改)</h2><p class="dim">用自己的話、90 秒能講完的量。批改後才會顯示必含概念。</p>';
   for (const q of unitData.questions) {
     const hist = attempts.filter(a => a.question_id === q.id);
@@ -148,7 +148,7 @@ async function renderSelfcheck() {
       if (!ta.value.trim()) return;
       btn.disabled = true; result.textContent = '批改中…(本機 claude,約 10-30 秒)'; result.className = 'result thinking';
       try {
-        const g = await api('/api/selfcheck', { method: 'POST', headers: {'Content-Type':'application/json'},
+        const g = await api('api/selfcheck', { method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({ course, unit, qid: q.id, answer: ta.value }) });
         result.className = 'result';
         result.innerHTML = `<span class="verdict-${g.verdict}">${g.verdict === 'pass' ? '✔ 通過' : '↻ 回爐'}</span>`;
@@ -195,7 +195,7 @@ function setMsgText(el, text, role) {
 
 async function loadChatHistory() {
   try {
-    const h = await api(`/api/chat/history?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
+    const h = await api(`api/chat/history?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
     for (const m of h.messages) addMsg(m.role, m.content);
     // 手機上不自動展開,避免一進頁面就蓋住講義
     if (h.messages.length && window.matchMedia('(min-width: 821px)').matches) panel.classList.remove('collapsed');
@@ -215,7 +215,7 @@ async function sendChat() {
   holder.querySelector('.bubble').innerHTML = '<span class="thinking">思考中…</span>';
   let acc = '';
   try {
-    const r = await fetch('/api/chat', { method: 'POST', headers: {'Content-Type':'application/json'},
+    const r = await fetch('api/chat', { method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ course, unit, message: text, newSession }) });
     const reader = r.body.getReader();
     const dec = new TextDecoder();

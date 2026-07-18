@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>學習中心</title>
-<script src="/vendor/cytoscape.min.js"></script>
+<script src="vendor/cytoscape.min.js"></script>
 <style>
   :root {
     --bg: #f6f7fb; --panel: #ffffff; --text: #172033; --muted: #6b7488;
@@ -161,7 +161,7 @@ let GRAPH = { edges: [] }; // /api/graph 的合併邊(手動 + 自動候選)
 let cy = null; // 圖譜 lazy init
 
 const esc = v => String(v ?? '').replace(/[&<>'"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c]));
-const readerUrl = (c, u) => `/reader.html?course=${encodeURIComponent(c)}&unit=${encodeURIComponent(u)}`;
+const readerUrl = (c, u) => `reader.html?course=${encodeURIComponent(c)}&unit=${encodeURIComponent(u)}`;
 const ago = iso => {
   const d = Math.floor((Date.now() - new Date(iso).getTime()) / 864e5);
   return d <= 0 ? '今天' : d === 1 ? '昨天' : d + ' 天前';
@@ -388,9 +388,9 @@ function render() {
 async function load() {
   try {
     const [c, redo, g] = await Promise.all([
-      fetch('/api/courses', { cache: 'no-store' }).then(r => r.json()),
-      fetch('/api/redo', { cache: 'no-store' }).then(r => r.json()),
-      fetch('/api/graph', { cache: 'no-store' }).then(r => r.json()),
+      fetch('api/courses', { cache: 'no-store' }).then(r => r.json()),
+      fetch('api/redo', { cache: 'no-store' }).then(r => r.json()),
+      fetch('api/graph', { cache: 'no-store' }).then(r => r.json()),
     ]);
     COURSES = c; REDO = redo; GRAPH = g;
     render();
@@ -422,7 +422,7 @@ document.addEventListener('click', async e => {
     const nextState = CYCLE[u.state];
     chip.disabled = true;
     try {
-      const r = await fetch('/api/progress', { method: 'POST',
+      const r = await fetch('api/progress', { method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ course: slug, unit: file, state: nextState }) });
       if (!r.ok) throw new Error(r.status);
