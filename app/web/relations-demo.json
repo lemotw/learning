@@ -1,0 +1,292 @@
+{
+  "model": "bge-m3",
+  "generatedAt": "2026-07-18T13:15:17.015Z",
+  "courses": [
+    {
+      "slug": "db_scale",
+      "title": "資料庫擴展學習計畫",
+      "avgSim": 0.6408250201296511
+    },
+    {
+      "slug": "fundamental-analysis",
+      "title": "股票基本面分析學習計畫",
+      "avgSim": 0.6651753468131564
+    },
+    {
+      "slug": "k8s",
+      "title": "k8s 學習計畫",
+      "avgSim": 0.6756396937344427
+    },
+    {
+      "slug": "linux-sysadmin",
+      "title": "Linux 系統管理:從指令到內核機制",
+      "avgSim": 0.6496884973909269
+    },
+    {
+      "slug": "technical-analysis",
+      "title": "股票技術分析學習計畫",
+      "avgSim": 0.6652635211982635
+    }
+  ],
+  "courseSims": [
+    {
+      "a": "fundamental-analysis",
+      "b": "technical-analysis",
+      "sim": 0.7680230106039903
+    },
+    {
+      "a": "k8s",
+      "b": "linux-sysadmin",
+      "sim": 0.7288941449101713
+    },
+    {
+      "a": "db_scale",
+      "b": "k8s",
+      "sim": 0.6943356097336942
+    },
+    {
+      "a": "linux-sysadmin",
+      "b": "technical-analysis",
+      "sim": 0.6502048318190565
+    },
+    {
+      "a": "db_scale",
+      "b": "fundamental-analysis",
+      "sim": 0.6480071605927443
+    },
+    {
+      "a": "fundamental-analysis",
+      "b": "k8s",
+      "sim": 0.6412381456687376
+    },
+    {
+      "a": "k8s",
+      "b": "technical-analysis",
+      "sim": 0.6380908746251677
+    },
+    {
+      "a": "db_scale",
+      "b": "linux-sysadmin",
+      "sim": 0.6162219424473268
+    },
+    {
+      "a": "db_scale",
+      "b": "technical-analysis",
+      "sim": 0.6047353677448392
+    },
+    {
+      "a": "fundamental-analysis",
+      "b": "linux-sysadmin",
+      "sim": 0.6034330703871532
+    }
+  ],
+  "courseEdges": [
+    {
+      "a": "fundamental-analysis",
+      "b": "technical-analysis",
+      "sim": 0.7680230106039903
+    },
+    {
+      "a": "k8s",
+      "b": "linux-sysadmin",
+      "sim": 0.7288941449101713
+    }
+  ],
+  "unitEdges": [
+    {
+      "a": {
+        "slug": "fundamental-analysis",
+        "file": "10-capstone.md",
+        "title": "Unit 10:整合 —— 選股檢查表,接上技術面"
+      },
+      "b": {
+        "slug": "technical-analysis",
+        "file": "10-capstone.md",
+        "title": "Unit 10:整合 —— 基本面 × 技術面的完整框架"
+      },
+      "sim": 0.8333742467041461
+    },
+    {
+      "a": {
+        "slug": "db_scale",
+        "file": "10-capstone.md",
+        "title": "Unit 10:整合專案 —— 總整與驗收"
+      },
+      "b": {
+        "slug": "fundamental-analysis",
+        "file": "10-capstone.md",
+        "title": "Unit 10:整合 —— 選股檢查表,接上技術面"
+      },
+      "sim": 0.7521762991241497
+    },
+    {
+      "a": {
+        "slug": "db_scale",
+        "file": "10-capstone.md",
+        "title": "Unit 10:整合專案 —— 總整與驗收"
+      },
+      "b": {
+        "slug": "k8s",
+        "file": "10-capstone.md",
+        "title": "Unit 10:整合專案 —— 總整與驗收"
+      },
+      "sim": 0.7458823051819
+    },
+    {
+      "a": {
+        "slug": "k8s",
+        "file": "01-container.md",
+        "title": "Unit 1:容器的真相 + 環境建置"
+      },
+      "b": {
+        "slug": "linux-sysadmin",
+        "file": "08-container-internals.md",
+        "title": "Unit 8:容器的 Linux 基礎 —— 容器不是小型 VM,是被限制視野的普通程序"
+      },
+      "sim": 0.7246470398591095
+    },
+    {
+      "a": {
+        "slug": "fundamental-analysis",
+        "file": "10-capstone.md",
+        "title": "Unit 10:整合 —— 選股檢查表,接上技術面"
+      },
+      "b": {
+        "slug": "technical-analysis",
+        "file": "08-risk-management.md",
+        "title": "Unit 8:風險管理 —— 停損與部位是同一件事"
+      },
+      "sim": 0.703910741831875
+    },
+    {
+      "a": {
+        "slug": "db_scale",
+        "file": "10-capstone.md",
+        "title": "Unit 10:整合專案 —— 總整與驗收"
+      },
+      "b": {
+        "slug": "technical-analysis",
+        "file": "10-capstone.md",
+        "title": "Unit 10:整合 —— 基本面 × 技術面的完整框架"
+      },
+      "sim": 0.6958255855347031
+    },
+    {
+      "a": {
+        "slug": "fundamental-analysis",
+        "file": "09-red-flags.md",
+        "title": "Unit 9:財報偵探 —— 紅旗清單"
+      },
+      "b": {
+        "slug": "technical-analysis",
+        "file": "09-backtest.md",
+        "title": "Unit 9:驗證你的訊號 —— 誠實回測的四道關卡"
+      },
+      "sim": 0.6890964493580021
+    },
+    {
+      "a": {
+        "slug": "fundamental-analysis",
+        "file": "01-income-statement.md",
+        "title": "Unit 1:商業模式與損益表 —— 先懂生意,再讀報表"
+      },
+      "b": {
+        "slug": "technical-analysis",
+        "file": "10-capstone.md",
+        "title": "Unit 10:整合 —— 基本面 × 技術面的完整框架"
+      },
+      "sim": 0.6880130202526348
+    },
+    {
+      "a": {
+        "slug": "db_scale",
+        "file": "10-capstone.md",
+        "title": "Unit 10:整合專案 —— 總整與驗收"
+      },
+      "b": {
+        "slug": "technical-analysis",
+        "file": "09-backtest.md",
+        "title": "Unit 9:驗證你的訊號 —— 誠實回測的四道關卡"
+      },
+      "sim": 0.6759587983132302
+    },
+    {
+      "a": {
+        "slug": "fundamental-analysis",
+        "file": "04-earnings-quality.md",
+        "title": "Unit 4:三表勾稽與獲利品質 —— 淨利是意見,現金是事實"
+      },
+      "b": {
+        "slug": "technical-analysis",
+        "file": "09-backtest.md",
+        "title": "Unit 9:驗證你的訊號 —— 誠實回測的四道關卡"
+      },
+      "sim": 0.6738845920322806
+    },
+    {
+      "a": {
+        "slug": "fundamental-analysis",
+        "file": "10-capstone.md",
+        "title": "Unit 10:整合 —— 選股檢查表,接上技術面"
+      },
+      "b": {
+        "slug": "technical-analysis",
+        "file": "09-backtest.md",
+        "title": "Unit 9:驗證你的訊號 —— 誠實回測的四道關卡"
+      },
+      "sim": 0.6696421632167344
+    },
+    {
+      "a": {
+        "slug": "db_scale",
+        "file": "04-transaction-mvcc.md",
+        "title": "Unit 4:交易、Isolation Level 與 MVCC"
+      },
+      "b": {
+        "slug": "technical-analysis",
+        "file": "09-backtest.md",
+        "title": "Unit 9:驗證你的訊號 —— 誠實回測的四道關卡"
+      },
+      "sim": 0.6638487409964978
+    },
+    {
+      "a": {
+        "slug": "db_scale",
+        "file": "09-caching.md",
+        "title": "Unit 9:快取模式 —— 穿透、擊穿、雪崩與 cache-aside"
+      },
+      "b": {
+        "slug": "technical-analysis",
+        "file": "09-backtest.md",
+        "title": "Unit 9:驗證你的訊號 —— 誠實回測的四道關卡"
+      },
+      "sim": 0.6637845643634487
+    },
+    {
+      "a": {
+        "slug": "fundamental-analysis",
+        "file": "06-valuation-pe.md",
+        "title": "Unit 6:估值 I —— PE 的深水區"
+      },
+      "b": {
+        "slug": "technical-analysis",
+        "file": "08-risk-management.md",
+        "title": "Unit 8:風險管理 —— 停損與部位是同一件事"
+      },
+      "sim": 0.6582459559513874
+    },
+    {
+      "a": {
+        "slug": "db_scale",
+        "file": "10-capstone.md",
+        "title": "Unit 10:整合專案 —— 總整與驗收"
+      },
+      "b": {
+        "slug": "technical-analysis",
+        "file": "08-risk-management.md",
+        "title": "Unit 8:風險管理 —— 停損與部位是同一件事"
+      },
+      "sim": 0.65774573316872
+    }
+  ]
+}
