@@ -15,7 +15,7 @@ description: 在本專案建立一門個人化課程(診斷 → 程度分析+課
 3. **程度分析**:依 `pipeline/prompts/assess.md` 分 ✅/❌/⬜ 三桶(引用原話),提議 agenda(單元數 = 洞聚類結果 6-12 + 整合單元)與課程關聯(讀 `courses/*/meta.json` 提議 relations)。
 4. **給使用者看,等回饋修改**。確認後固化:`courses/<slug>/DIAGNOSTIC.md`、`AGENDA.md`、`meta.json`(照 `pipeline/templates/`;slug 用英文 kebab-case),並建 `units/` 佔位檔(只有 `# Unit N:標題` 一行)、`labs/`。固化 meta.json 時**依 `pipeline/prompts/concepts.md` 規格從 AGENDA 萃取 8-12 個概念填入 `concepts`**(name + desc,禁模板詞)——這是課程關聯自動計算的資料來源;萃取在此刻做掉,關聯腳本執行期就完全不需要 LLM。
 5. **平行生成講義**:用 `pipeline/prompts/unit-writer.md` 模板派 agent,每個 agent 3-4 個單元、同一則訊息平行發出。格式重點:markdown-it 可渲染(禁 `!!!`)、`## Lab`、`## 自答題` + `<!-- qN keywords: ... -->` 緊貼題目上一行。
-6. **驗收**:跑 `./pipeline/verify.sh <slug>`;不過的單元帶評語重派。過了把 meta.json 的 `status` 改成 `active`。瀏覽器開 `http://127.0.0.1:4600/reader.html?course=<slug>&unit=01-….md` 抽讀確認渲染正常。
+6. **驗收**:跑 `./pipeline/verify.sh <slug>`;不過的單元帶評語重派。過了把 meta.json 的 `status` 改成 `active`,接著跑 `node pipeline/relations.js` 更新自動關聯(純本機,需 Ollama;不在就會自行跳過)。瀏覽器開 `http://127.0.0.1:4600/reader.html?course=<slug>&unit=01-….md` 抽讀確認渲染正常。
 7. **診斷永久留檔**:DIAGNOSTIC.md 不得刪除——reader 的 AI 助教與自答題批改都靠它個人化。
 
 ## 必停點

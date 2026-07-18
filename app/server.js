@@ -126,12 +126,24 @@ async function handleApi(req, res, url) {
       units: c.units.map(u => ({ file: u.file, title: u.title, state: u.state })),
     }));
     const edges = [];
+    const seen = new Set();
     for (const c of courses) {
       for (const r of c.relations) {
         if (!known.has(r.to)) continue;
-        edges.push({ source: c.slug, target: r.to, type: r.type || 'related', why: r.why || '' });
+        edges.push({ source: c.slug, target: r.to, type: r.type || 'related', why: r.why || '', origin: 'manual' });
+        seen.add([c.slug, r.to].sort().join('|'));
       }
     }
+    // 自動候選邊(pipeline/relations.js 產出);手動邊優先,同配對不重複
+    try {
+      const auto = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'graph-auto.json'), 'utf8'));
+      for (const e of auto.edges || []) {
+        if (!known.has(e.a) || !known.has(e.b)) continue;
+        if (seen.has([e.a, e.b].sort().join('|'))) continue;
+        edges.push({ source: e.a, target: e.b, type: 'related', origin: 'auto',
+          score: e.score, why: e.why || '', evidence: e.evidence || [] });
+      }
+    } catch { /* 沒有 auto 檔就只出手動邊 */ }
     return json(res, 200, { nodes, edges });
   }
 
