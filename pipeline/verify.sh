@@ -20,11 +20,13 @@ UNITS=("$DIR"/units/*.md)
 
 for f in "${UNITS[@]}"; do
   name="$(basename "$f")"
+  # 顯式豁免:<!-- verify: skip=lines,lab -->(整合/附錄類特例才用)
+  skips="$(grep -oE '<!-- verify: skip=[a-z,]+ -->' "$f" | grep -oE 'skip=[a-z,]+' || true)"
   lines=$(wc -l < "$f")
-  if [ "$lines" -lt 100 ] || [ "$lines" -gt 400 ]; then
+  if [[ "$skips" != *lines* ]] && { [ "$lines" -lt 100 ] || [ "$lines" -gt 400 ]; }; then
     err "$name 行數 $lines(應在 100-400)"
   fi
-  grep -q '^## Lab' "$f" || err "$name 缺 ## Lab"
+  [[ "$skips" == *lab* ]] || grep -q '^## Lab' "$f" || err "$name 缺 ## Lab"
   grep -q '^## 自答題' "$f" || err "$name 缺 ## 自答題"
   grep -qE '<!--\s*q[[:alnum:]_-]*\s+keywords:' "$f" || err "$name 沒有任何 keywords 註解(自答題無法批改)"
   grep -q '^!!!' "$f" && err "$name 用了 mkdocs admonition 語法(reader 不支援)"

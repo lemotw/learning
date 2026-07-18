@@ -6,9 +6,12 @@
 <title>講義</title>
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/vendor/highlight-github-dark.min.css">
+<link rel="stylesheet" href="/vendor/katex/katex.min.css">
 <script src="/vendor/markdown-it.min.js"></script>
 <script src="/vendor/highlight.min.js"></script>
 <script src="/vendor/mermaid.min.js"></script>
+<script src="/vendor/katex/katex.min.js"></script>
+<script src="/vendor/katex/auto-render.min.js"></script>
 </head>
 <body>
 <div class="topbar">
@@ -72,8 +75,24 @@ async function load() {
   unitData = await api(`/api/unit?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
   document.title = unitData.courseTitle + ' · ' + unit;
   document.getElementById('crumb').textContent = unitData.courseTitle + ' / ' + unit.replace(/\.md$/, '');
-  document.getElementById('md').innerHTML = mdi.render(unitData.md);
+  const mdEl = document.getElementById('md');
+  mdEl.innerHTML = mdi.render(unitData.md);
   mermaid.run({ querySelector: '#md .mermaid' }).catch(()=>{});
+  // $$ 數學式(fundamental-analysis 等課程使用)
+  if (window.renderMathInElement) renderMathInElement(mdEl, {
+    delimiters: [
+      { left: '$$', right: '$$', display: true },
+      { left: '\\(', right: '\\)', display: false },
+    ],
+    throwOnError: false,
+  });
+  // 講義內的相對 .md 連結改走 reader
+  mdEl.querySelectorAll('a[href$=".md"]').forEach(a => {
+    const href = a.getAttribute('href');
+    if (/^https?:/.test(href)) return;
+    const file = href.split('/').pop();
+    a.href = `/reader.html?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(file)}`;
+  });
   renderStateButtons(unitData.state);
   setupNav();
   renderSelfcheck();
