@@ -35,5 +35,3 @@ node app/server.js            # http://127.0.0.1:4600
 在專案目錄跑 Claude Code:`/new-course <主題>`(skill 在 `.claude/skills/new-course/`)。
 七步流程:說要學什麼 → 診斷 6-8 題(停)→ 程度分析 + agenda + 課程關聯提議 → 確認後固化
 DIAGNOSTIC/AGENDA/meta.json(停)→ 平行生成單元 → verify.sh 驗收 → 診斷永久留檔。
-
-`courses/demo-http`、`courses/demo-git` 是驗證 app 用的 demo,可整個目錄刪除。
