@@ -3,7 +3,9 @@
   "status": "generating",
   "created": "YYYY-MM-DD",
   "tags": ["topic-a", "topic-b"],
-  "concepts": ["概念1", "概念2"],
+  "concepts": [
+    { "name": "概念名(裸名詞 2-10 字,規格見 pipeline/prompts/concepts.md)", "desc": "一句話定義(15-30 字,給語意比對用)" }
+  ],
   "relations": [
     { "to": "另一門課的 slug", "type": "related|prereq|extends", "why": "一句話說明關聯" }
   ]
