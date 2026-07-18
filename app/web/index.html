@@ -112,8 +112,18 @@
   .redo-badge { color: var(--redo); font-weight: 700; }
   .empty { padding: 14px 18px; font-size: 12.5px; color: var(--muted); }
 
+  .cy-wrap { position: relative; }
   #cy { height: calc(100vh - 220px); min-height: 460px; border: 1px solid var(--line);
     border-radius: 16px; background: var(--panel); }
+  .cy-tip {
+    position: absolute; z-index: 20; max-width: 280px; pointer-events: none;
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 10px; padding: 8px 12px; font-size: 12.5px; line-height: 1.55;
+    box-shadow: 0 6px 20px rgba(0,0,0,.18); opacity: 0; transition: opacity .12s ease;
+  }
+  .cy-tip.show { opacity: 1; }
+  .cy-tip b { font-size: 12px; }
+  .cy-tip .why { color: var(--muted); margin-top: 2px; }
   .graph-hint { font-size: 12px; color: var(--muted); margin: 8px 2px 0; }
 
   .error { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
@@ -231,8 +241,8 @@ function detailHTML(slug) {
 }
 
 function graphHTML() {
-  return tabsHTML('graph') + `<div id="cy"></div>
-    <div class="graph-hint">實線箭頭 = 先修(prereq)、虛線 = 相關(related)。點課程節點展開/收合單元;點單元進講義;點連線看關聯理由。</div>`;
+  return tabsHTML('graph') + `<div class="cy-wrap"><div id="cy"></div><div class="cy-tip" id="cyTip"></div></div>
+    <div class="graph-hint">實線箭頭 = 先修(prereq)、虛線 = 相關(related)。點課程節點展開/收合單元;點單元進講義;滑過連線看關聯理由。</div>`;
 }
 
 // ---------- 圖譜 ----------
@@ -311,10 +321,32 @@ function initGraph() {
     const d = ev.target.data();
     location.href = readerUrl(d.course, d.file);
   });
-  cy.on('tap', 'edge[kind="rel"]', (ev) => {
+  // 關聯線 tooltip:hover 顯示(觸控裝置用 tap 切換)
+  const tip = document.getElementById('cyTip');
+  const TYPE_LABEL = { prereq: '先修', related: '相關', extends: '深入' };
+  function showTip(ev) {
     const d = ev.target.data();
-    if (d.why) alert(`${courseTitle(d.source)} → ${courseTitle(d.target)}(${d.type})\n${d.why}`);
-  });
+    tip.innerHTML = `<b>${esc(courseTitle(d.source))} ${d.type === 'prereq' ? '→' : '↔'} ${esc(courseTitle(d.target))}</b>
+      <span class="dim">(${TYPE_LABEL[d.type] || esc(d.type)})</span>
+      ${d.why ? `<div class="why">${esc(d.why)}</div>` : ''}`;
+    const pos = ev.renderedPosition || (ev.target.midpoint && { x: ev.target.renderedMidpoint().x, y: ev.target.renderedMidpoint().y });
+    const wrap = container.getBoundingClientRect();
+    let x = (pos ? pos.x : wrap.width / 2) + 14;
+    let y = (pos ? pos.y : wrap.height / 2) + 14;
+    tip.classList.add('show');
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    if (x + tw > wrap.width - 8) x = Math.max(8, x - tw - 28);
+    if (y + th > wrap.height - 8) y = Math.max(8, y - th - 28);
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+  }
+  const hideTip = () => tip.classList.remove('show');
+  cy.on('mouseover', 'edge[kind="rel"]', showTip);
+  cy.on('mousemove', 'edge[kind="rel"]', showTip);
+  cy.on('mouseout', 'edge[kind="rel"]', hideTip);
+  cy.on('tap', 'edge[kind="rel"]', (ev) => tip.classList.contains('show') ? hideTip() : showTip(ev));
+  cy.on('tap', (ev) => { if (ev.target === cy) hideTip(); }); // 點空白處關掉
+  cy.on('pan zoom', hideTip);
 }
 
 // ---------- render / events ----------
