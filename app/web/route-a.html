@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>路線 A:整份 Embed + 幾何後處理</title>
+<link rel="stylesheet" href="/routes-demo.css">
+<script src="/routes-demo-lib.js"></script>
+</head>
+<body>
+<main>
+  <div class="nav">
+    <a href="/route-a.html" class="on">A 幾何後處理</a>
+    <a href="/route-b.html">B 概念萃取 + MaxSim</a>
+    <a href="/route-c.html">C 指令式 Embedding</a>
+    <a href="/graph-demo.html">← 原始 demo</a>
+  </div>
+  <h1>路線 A:整份 Embed + 幾何後處理</h1>
+  <div class="sub">整份 AGENDA 一個向量,靠事後的幾何操作(centering / ABTT)把「同文體基線」剝掉。產生於 <span class="gen-time"></span></div>
+
+  <h2>這條路線怎麼處理 AGENDA</h2>
+  <div class="steps">
+    <div class="step"><b>整份課綱直接向量化</b>
+      每門課取「標題 + AGENDA.md 全文」(截 6000 字),丟給 bge-m3,得到一個 1024 維向量。文體、模板詞、主題全部混在同一個向量裡。
+      <div class="eg">「資料庫擴展\n# 課綱\n1. Unit 1:儲存引擎與 B+tree…」 → [0.03, -0.11, …](1024 維)</div></div>
+    <div class="step"><b>兩兩算 cosine(= 原始分數)</b>
+      10 個配對的分數全部擠在 0.60~0.77 的窄帶——因為每個向量都帶著「繁中教學講義」這個共同成分,任兩門課先天就有 0.6 的「同文體基線」。</div>
+    <div class="step"><b>Centering:減去全體平均向量</b>
+      把 5 個向量的平均算出來、從每個向量裡減掉。平均向量 ≈「大家都有的成分」= 文體 + 模板;減掉後剩下的才是各課獨有的主題訊號。</div>
+    <div class="step"><b>ABTT:再移除第一主成分(本次實測翻車,見下)</b>
+      文獻的完整做法是 centering 之後再把前 k 個主成分投影掉。<b>前提是語料要夠大</b>——樣本多時主成分才會是「殘餘的通用方向」;只有 5 個向量時,第一主成分抓到的反而是「金融 vs 資訊」這條<b>最有用的主題軸</b>,移掉它等於自宮。</div>
+    <div class="step"><b>相對排名 + 空隙偵測選邊</b>
+      不設絕對閾值;把分數排序,找最大的相鄰落差,切在空隙處。</div>
+  </div>
+
+  <h2>實測分布(綠點 = 人工基準的三條真關聯)</h2>
+  <div class="card" id="strips"></div>
+
+  <h2>逐配對分數</h2>
+  <div class="card"><b class="small">Centering 後(本路線最佳版本)</b><div id="tbl"></div></div>
+
+  <h2>評語</h2>
+  <div class="card verdict good"><b>Centering:本次實測的最佳性價比。</b>
+    一行程式碼把值域從 0.165 拉寬到 0.558,三條真關聯全部浮到前三名,且和背景雲之間出現明顯空隙。純程式、零 LLM、毫秒級。</div>
+  <div class="card verdict bad"><b>ABTT 在小語料上會反噬。</b>
+    實測移除第一主成分後排序完全亂掉(真關聯反而沉底)——5 個樣本的第一主成分就是主題訊號本身。
+    結論:課程數少時只做 centering;等語料規模上來(數十門課/直接用全部單元向量估主成分)再考慮 ABTT。</div>
+</main>
+<script>
+loadData().then(d => {
+  const s = document.getElementById('strips');
+  renderStrip(s, d.routeA.raw, '原始 cosine(未處理)');
+  renderStrip(s, d.routeA.centered, 'Centering 後');
+  renderStrip(s, d.routeA.abtt, 'ABTT(centering + 移除第一主成分)——翻車示範');
+  renderTable(document.getElementById('tbl'), d.routeA.centered);
+});
+</script>
+</body>
+</html>

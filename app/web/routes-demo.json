@@ -1,0 +1,694 @@
+{
+  "generatedAt": "2026-07-18T13:52:46.361Z",
+  "courses": [
+    {
+      "slug": "db_scale",
+      "title": "資料庫擴展學習計畫"
+    },
+    {
+      "slug": "fundamental-analysis",
+      "title": "股票基本面分析學習計畫"
+    },
+    {
+      "slug": "k8s",
+      "title": "k8s 學習計畫"
+    },
+    {
+      "slug": "linux-sysadmin",
+      "title": "Linux 系統管理:從指令到內核機制"
+    },
+    {
+      "slug": "technical-analysis",
+      "title": "股票技術分析學習計畫"
+    }
+  ],
+  "trueEdges": [
+    "fundamental-analysis|technical-analysis",
+    "k8s|linux-sysadmin",
+    "db_scale|k8s"
+  ],
+  "routeA": {
+    "raw": {
+      "pairs": [
+        {
+          "a": "fundamental-analysis",
+          "b": "technical-analysis",
+          "score": 0.7680230106039903,
+          "isTrue": true
+        },
+        {
+          "a": "k8s",
+          "b": "linux-sysadmin",
+          "score": 0.7288941449101713,
+          "isTrue": true
+        },
+        {
+          "a": "db_scale",
+          "b": "k8s",
+          "score": 0.6943356097336942,
+          "isTrue": true
+        },
+        {
+          "a": "linux-sysadmin",
+          "b": "technical-analysis",
+          "score": 0.6502048318190565,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "fundamental-analysis",
+          "score": 0.6480071605927443,
+          "isTrue": false
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "k8s",
+          "score": 0.6412381456687376,
+          "isTrue": false
+        },
+        {
+          "a": "k8s",
+          "b": "technical-analysis",
+          "score": 0.6380908746251677,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "linux-sysadmin",
+          "score": 0.6162219424473268,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "technical-analysis",
+          "score": 0.6047353677448392,
+          "isTrue": false
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "linux-sysadmin",
+          "score": 0.6034330703871532,
+          "isTrue": false
+        }
+      ],
+      "stats": {
+        "spread": 0.16458994021683704,
+        "gap": 0.04413077791463771,
+        "gapAfterRank": 3
+      }
+    },
+    "centered": {
+      "pairs": [
+        {
+          "a": "fundamental-analysis",
+          "b": "technical-analysis",
+          "score": 0.1183056384694495,
+          "isTrue": true
+        },
+        {
+          "a": "k8s",
+          "b": "linux-sysadmin",
+          "score": -0.014691870743461165,
+          "isTrue": true
+        },
+        {
+          "a": "db_scale",
+          "b": "k8s",
+          "score": -0.11500709408593038,
+          "isTrue": true
+        },
+        {
+          "a": "db_scale",
+          "b": "fundamental-analysis",
+          "score": -0.24589617314154252,
+          "isTrue": false
+        },
+        {
+          "a": "linux-sysadmin",
+          "b": "technical-analysis",
+          "score": -0.2699819339228382,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "linux-sysadmin",
+          "score": -0.3008357011921504,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "technical-analysis",
+          "score": -0.39970919764884794,
+          "isTrue": false
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "k8s",
+          "score": -0.4082190778320216,
+          "isTrue": false
+        },
+        {
+          "a": "k8s",
+          "b": "technical-analysis",
+          "score": -0.4209674219560257,
+          "isTrue": false
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "linux-sysadmin",
+          "score": -0.43955631901735087,
+          "isTrue": false
+        }
+      ],
+      "stats": {
+        "spread": 0.5578619574868003,
+        "gap": 0.13299750921291068,
+        "gapAfterRank": 1
+      }
+    },
+    "abtt": {
+      "pairs": [
+        {
+          "a": "linux-sysadmin",
+          "b": "technical-analysis",
+          "score": 0.1896100134784444,
+          "isTrue": false
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "k8s",
+          "score": 0.09526374158590507,
+          "isTrue": false
+        },
+        {
+          "a": "k8s",
+          "b": "technical-analysis",
+          "score": 0.03172516799391338,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "fundamental-analysis",
+          "score": 0.009586387261760473,
+          "isTrue": false
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "linux-sysadmin",
+          "score": -0.07558272050603725,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "technical-analysis",
+          "score": -0.2448692875595984,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "k8s",
+          "score": -0.41827967631384905,
+          "isTrue": true
+        },
+        {
+          "a": "k8s",
+          "b": "linux-sysadmin",
+          "score": -0.48599390102634404,
+          "isTrue": true
+        },
+        {
+          "a": "db_scale",
+          "b": "linux-sysadmin",
+          "score": -0.5903789290714653,
+          "isTrue": false
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "technical-analysis",
+          "score": -0.9714470136810754,
+          "isTrue": true
+        }
+      ],
+      "stats": {
+        "spread": 1.1610570271595198,
+        "gap": 0.38106808460961017,
+        "gapAfterRank": 9
+      }
+    }
+  },
+  "routeB": {
+    "concepts": {
+      "db_scale": [
+        "B+tree 索引",
+        "buffer pool",
+        "WAL",
+        "LSM-tree",
+        "EXPLAIN",
+        "MVCC",
+        "isolation level",
+        "樂觀鎖",
+        "deadlock",
+        "replication",
+        "failover",
+        "sharding"
+      ],
+      "fundamental-analysis": [
+        "毛利率",
+        "自由現金流",
+        "應計會計",
+        "黑字倒閉",
+        "杜邦分析",
+        "ROE",
+        "forward PE",
+        "PEG",
+        "景氣循環股",
+        "EV/EBITDA",
+        "護城河",
+        "殖利率"
+      ],
+      "k8s": [
+        "kubelet",
+        "etcd",
+        "ReplicaSet",
+        "rolling update",
+        "ClusterIP",
+        "kube-proxy",
+        "liveness probe",
+        "readiness probe",
+        "OOMKilled",
+        "CrashLoopBackOff",
+        "Ingress controller",
+        "label selector"
+      ],
+      "linux-sysadmin": [
+        "fork/exec",
+        "syscall",
+        "fd 表",
+        "SIGTERM",
+        "SIGHUP",
+        "殭屍程序",
+        "process group",
+        "inode",
+        "硬連結",
+        "inode 耗盡",
+        "overlayfs",
+        "cgroup"
+      ],
+      "technical-analysis": [
+        "K線型態",
+        "長下影線",
+        "支撐壓力",
+        "頭肩頂",
+        "黃金交叉",
+        "多頭排列",
+        "價漲量縮",
+        "RSI 鈍化",
+        "頂部背離",
+        "MACD 柱狀圖",
+        "三大法人",
+        "融資餘額"
+      ]
+    },
+    "maxsim": {
+      "pairs": [
+        {
+          "a": "db_scale",
+          "b": "k8s",
+          "score": 0.135809291126733,
+          "isTrue": true
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "technical-analysis",
+          "score": 0.1229709667510531,
+          "isTrue": true
+        },
+        {
+          "a": "k8s",
+          "b": "linux-sysadmin",
+          "score": 0.11502547569437527,
+          "isTrue": true
+        },
+        {
+          "a": "db_scale",
+          "b": "fundamental-analysis",
+          "score": 0.11068070238811784,
+          "isTrue": false
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "k8s",
+          "score": 0.09947536740863366,
+          "isTrue": false
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "linux-sysadmin",
+          "score": 0.09690016028579482,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "linux-sysadmin",
+          "score": 0.08804955726838719,
+          "isTrue": false
+        },
+        {
+          "a": "linux-sysadmin",
+          "b": "technical-analysis",
+          "score": 0.07805856212440418,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "technical-analysis",
+          "score": 0.07558136754769273,
+          "isTrue": false
+        },
+        {
+          "a": "k8s",
+          "b": "technical-analysis",
+          "score": 0.05474078190709591,
+          "isTrue": false
+        }
+      ],
+      "stats": {
+        "spread": 0.0810685092196371,
+        "gap": 0.020840585640596827,
+        "gapAfterRank": 9
+      }
+    },
+    "evidence": {
+      "db_scale|fundamental-analysis": [
+        {
+          "from": "deadlock",
+          "to": "黑字倒閉",
+          "score": 0.24308318661183081
+        },
+        {
+          "from": "樂觀鎖",
+          "to": "景氣循環股",
+          "score": 0.18479832349330144
+        },
+        {
+          "from": "failover",
+          "to": "黑字倒閉",
+          "score": 0.1673845084101035
+        }
+      ],
+      "db_scale|k8s": [
+        {
+          "from": "replication",
+          "to": "ReplicaSet",
+          "score": 0.4220598505614715
+        },
+        {
+          "from": "failover",
+          "to": "CrashLoopBackOff",
+          "score": 0.20382412766437874
+        },
+        {
+          "from": "deadlock",
+          "to": "OOMKilled",
+          "score": 0.18782416564744608
+        }
+      ],
+      "db_scale|linux-sysadmin": [
+        {
+          "from": "failover",
+          "to": "inode 耗盡",
+          "score": 0.16276826106803471
+        },
+        {
+          "from": "LSM-tree",
+          "to": "fd 表",
+          "score": 0.12502268910989767
+        },
+        {
+          "from": "isolation level",
+          "to": "inode",
+          "score": 0.12341945188308127
+        }
+      ],
+      "db_scale|technical-analysis": [
+        {
+          "from": "isolation level",
+          "to": "RSI 鈍化",
+          "score": 0.13144625181477337
+        },
+        {
+          "from": "LSM-tree",
+          "to": "MACD 柱狀圖",
+          "score": 0.12060837039175808
+        },
+        {
+          "from": "樂觀鎖",
+          "to": "黃金交叉",
+          "score": 0.10197275005638033
+        }
+      ],
+      "fundamental-analysis|k8s": [
+        {
+          "from": "EV/EBITDA",
+          "to": "etcd",
+          "score": 0.21023901646160917
+        },
+        {
+          "from": "黑字倒閉",
+          "to": "CrashLoopBackOff",
+          "score": 0.18931117833664096
+        },
+        {
+          "from": "forward PE",
+          "to": "kube-proxy",
+          "score": 0.18259500564890158
+        }
+      ],
+      "fundamental-analysis|linux-sysadmin": [
+        {
+          "from": "自由現金流",
+          "to": "fd 表",
+          "score": 0.177424728640299
+        },
+        {
+          "from": "EV/EBITDA",
+          "to": "fork/exec",
+          "score": 0.1763451944639344
+        },
+        {
+          "from": "ROE",
+          "to": "inode",
+          "score": 0.15840205607412403
+        }
+      ],
+      "fundamental-analysis|technical-analysis": [
+        {
+          "from": "毛利率",
+          "to": "融資餘額",
+          "score": 0.2979759572936216
+        },
+        {
+          "from": "殖利率",
+          "to": "融資餘額",
+          "score": 0.25170923641077975
+        },
+        {
+          "from": "自由現金流",
+          "to": "融資餘額",
+          "score": 0.236775675566177
+        }
+      ],
+      "k8s|linux-sysadmin": [
+        {
+          "from": "etcd",
+          "to": "fd 表",
+          "score": 0.2320201724016233
+        },
+        {
+          "from": "Ingress controller",
+          "to": "inode",
+          "score": 0.14251950737053737
+        },
+        {
+          "from": "OOMKilled",
+          "to": "殭屍程序",
+          "score": 0.13634140392610544
+        }
+      ],
+      "k8s|technical-analysis": [
+        {
+          "from": "CrashLoopBackOff",
+          "to": "頂部背離",
+          "score": 0.13606921653850695
+        },
+        {
+          "from": "label selector",
+          "to": "多頭排列",
+          "score": 0.11627718325318748
+        },
+        {
+          "from": "etcd",
+          "to": "MACD 柱狀圖",
+          "score": 0.10756301421545493
+        }
+      ],
+      "linux-sysadmin|technical-analysis": [
+        {
+          "from": "fd 表",
+          "to": "MACD 柱狀圖",
+          "score": 0.14727203061040225
+        },
+        {
+          "from": "硬連結",
+          "to": "支撐壓力",
+          "score": 0.1442437405567127
+        },
+        {
+          "from": "overlayfs",
+          "to": "長下影線",
+          "score": 0.12988761668987442
+        }
+      ]
+    }
+  },
+  "routeC": {
+    "raw": {
+      "pairs": [
+        {
+          "a": "fundamental-analysis",
+          "b": "technical-analysis",
+          "score": 0.7761914760782744,
+          "isTrue": true
+        },
+        {
+          "a": "k8s",
+          "b": "linux-sysadmin",
+          "score": 0.6835258863021549,
+          "isTrue": true
+        },
+        {
+          "a": "k8s",
+          "b": "technical-analysis",
+          "score": 0.5724780051538024,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "k8s",
+          "score": 0.5699241405689328,
+          "isTrue": true
+        },
+        {
+          "a": "db_scale",
+          "b": "linux-sysadmin",
+          "score": 0.5601875777581623,
+          "isTrue": false
+        },
+        {
+          "a": "linux-sysadmin",
+          "b": "technical-analysis",
+          "score": 0.533718197139739,
+          "isTrue": false
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "k8s",
+          "score": 0.5293094578329747,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "technical-analysis",
+          "score": 0.522254928996531,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "fundamental-analysis",
+          "score": 0.5129165140033425,
+          "isTrue": false
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "linux-sysadmin",
+          "score": 0.49491860358949713,
+          "isTrue": false
+        }
+      ],
+      "stats": {
+        "spread": 0.2812728724887773,
+        "gap": 0.11104788114835251,
+        "gapAfterRank": 2
+      }
+    },
+    "centered": {
+      "pairs": [
+        {
+          "a": "fundamental-analysis",
+          "b": "technical-analysis",
+          "score": 0.2941078661212218,
+          "isTrue": true
+        },
+        {
+          "a": "k8s",
+          "b": "linux-sysadmin",
+          "score": 0.055133031179153566,
+          "isTrue": true
+        },
+        {
+          "a": "db_scale",
+          "b": "linux-sysadmin",
+          "score": -0.17971131266413665,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "k8s",
+          "score": -0.20814632247831444,
+          "isTrue": true
+        },
+        {
+          "a": "db_scale",
+          "b": "fundamental-analysis",
+          "score": -0.33664735092677744,
+          "isTrue": false
+        },
+        {
+          "a": "db_scale",
+          "b": "technical-analysis",
+          "score": -0.3826478446366463,
+          "isTrue": false
+        },
+        {
+          "a": "k8s",
+          "b": "technical-analysis",
+          "score": -0.38619580921834207,
+          "isTrue": false
+        },
+        {
+          "a": "linux-sysadmin",
+          "b": "technical-analysis",
+          "score": -0.43600382027531015,
+          "isTrue": false
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "k8s",
+          "score": -0.4408025636998647,
+          "isTrue": false
+        },
+        {
+          "a": "fundamental-analysis",
+          "b": "linux-sysadmin",
+          "score": -0.471402231330141,
+          "isTrue": false
+        }
+      ],
+      "stats": {
+        "spread": 0.7655100974513628,
+        "gap": 0.23897483494206823,
+        "gapAfterRank": 1
+      }
+    }
+  }
+}
