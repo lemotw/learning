@@ -126,6 +126,21 @@
   .cy-tip .why { color: var(--muted); margin-top: 2px; }
   .graph-hint { font-size: 12px; color: var(--muted); margin: 8px 2px 0; }
 
+  /* IE 流程說明:資訊 icon + hover 詳細 */
+  .info-wrap { position: relative; display: inline-block; margin-left: 6px; vertical-align: middle; }
+  .info-icon { display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--muted);
+    color: var(--muted); font-size: 11px; font-weight: 700; cursor: help; user-select: none; }
+  .info-pop { display: none; position: absolute; bottom: 22px; left: -12px; z-index: 30;
+    width: min(420px, 80vw); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px 16px; box-shadow: 0 8px 28px rgba(0,0,0,.22);
+    font-size: 12.5px; line-height: 1.7; color: var(--text); }
+  .info-wrap:hover .info-pop, .info-wrap:focus-within .info-pop { display: block; }
+  .info-pop > b { display: block; margin-bottom: 4px; }
+  .info-pop ol { margin: 4px 0 0; padding-left: 18px; }
+  .info-pop li { margin-bottom: 3px; }
+  .info-pop .dim { color: var(--muted); font-size: 11.5px; }
+
   .error { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
     padding: 16px; color: var(--muted); font-size: 13px; }
   footer { margin-top: 20px; color: var(--muted); font-size: 12px; text-align: right; }
@@ -243,7 +258,18 @@ function detailHTML(slug) {
 
 function graphHTML() {
   return tabsHTML('graph') + `<div class="cy-wrap"><div id="cy"></div><div class="cy-tip" id="cyTip"></div></div>
-    <div class="graph-hint">虛線 = 相關(概念比對自動生成)、實線箭頭 = 先修(prereq,手動標註)。點課程節點展開/收合單元;點單元進講義;滑過連線看概念呼應。</div>`;
+    <div class="graph-hint">虛線 = 相關(概念比對自動生成)、實線箭頭 = 先修(prereq,手動標註)。點課程節點展開/收合單元;點單元進講義;滑過連線看概念呼應。<span class="info-wrap" tabindex="0"><span class="info-icon">i</span><span class="info-pop">
+      <b>關聯怎麼算出來的(Information Extraction 流程)</b>
+      <ol>
+        <li><b>概念萃取(生成期)</b>:開課時 LLM 從課綱 AGENDA 萃取 8-12 個概念(裸名詞 + 一句定義,禁教學模板詞),存進該課 meta.json 的 concepts。</li>
+        <li><b>向量化</b>:本機 Ollama(bge-m3)把每個概念變成 1024 維向量,依內容 hash 快取,沒改過的概念零計算。</li>
+        <li><b>Centering</b>:減去全部概念的平均向量,消除「同為技術名詞」的共同基線,只留各自的主題訊號。</li>
+        <li><b>MaxSim 比對</b>:A 課的每個概念到 B 課找最相似的概念取分,雙向平均 = 兩課相似度(ColBERT late interaction)。</li>
+        <li><b>空隙偵測</b>:所有課程配對按分數排序,在最大相鄰落差處切線,落差之上成為圖上的邊。</li>
+        <li><b>概念呼應</b>:每條邊附上分數最高的概念配對當證據,就是 tooltip 裡看到的內容。</li>
+      </ol>
+      <span class="dim">執行:node pipeline/relations.js(純本機、零 LLM);萃取規格見 pipeline/prompts/concepts.md。</span>
+    </span></span></div>`;
 }
 
 // ---------- 圖譜 ----------
