@@ -12,16 +12,16 @@
 </head>
 <body>
 <div class="topbar">
-  <a href="/">← 課程圖</a>
-  <span id="crumb" class="dim"></span>
+  <a href="/">← 課程</a>
+  <span id="crumb" class="dim crumb"></span>
   <span class="spacer"></span>
-  <span class="dim">狀態:</span>
+  <span class="dim hide-sm">狀態:</span>
   <button data-state="unread">未讀</button>
   <button data-state="reading">閱讀中</button>
   <button data-state="done">完成</button>
-  <span style="width:12px"></span>
-  <button id="prevBtn">上一單元</button>
-  <button id="nextBtn">下一單元</button>
+  <span class="hide-sm" style="width:12px"></span>
+  <button id="prevBtn">‹ 上一</button>
+  <button id="nextBtn">下一 ›</button>
   <button id="chatToggle">💬 助教</button>
 </div>
 
@@ -34,8 +34,10 @@
   <aside class="chatpanel collapsed" id="chatpanel">
     <header>
       <b>單元助教</b>
-      <span class="dim" style="flex:1">知道你的診斷弱點與本單元內容</span>
+      <span class="dim hide-sm" style="flex:1">知道你的診斷弱點與本單元內容</span>
+      <span class="spacer"></span>
       <button id="newChat" title="開新對話">＋新對話</button>
+      <button id="chatClose" title="關閉">✕</button>
     </header>
     <div class="chatlog" id="chatlog"></div>
     <div class="chatinput">
@@ -155,6 +157,7 @@ async function renderSelfcheck() {
 const chatlog = document.getElementById('chatlog');
 const panel = document.getElementById('chatpanel');
 document.getElementById('chatToggle').onclick = () => panel.classList.toggle('collapsed');
+document.getElementById('chatClose').onclick = () => panel.classList.add('collapsed');
 
 function addMsg(role, text) {
   const d = document.createElement('div');
@@ -175,7 +178,8 @@ async function loadChatHistory() {
   try {
     const h = await api(`/api/chat/history?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
     for (const m of h.messages) addMsg(m.role, m.content);
-    if (h.messages.length) panel.classList.remove('collapsed');
+    // 手機上不自動展開,避免一進頁面就蓋住講義
+    if (h.messages.length && window.matchMedia('(min-width: 821px)').matches) panel.classList.remove('collapsed');
   } catch {}
 }
 
