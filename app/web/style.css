@@ -24,6 +24,8 @@ button {
   border-radius: 6px; padding: 4px 12px; cursor: pointer; font: inherit; font-size: 13px;
 }
 button:hover { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:disabled:hover { border-color: var(--border); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 textarea {
@@ -44,6 +46,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
 }
 .badge.done { color: var(--ok); border-color: var(--ok); }
 .badge.reading { color: var(--warn); border-color: var(--warn); }
+.badge.offline { color: var(--warn); border-color: var(--warn); }
 
 /* markdown 內容 */
 .md { max-width: 780px; margin: 0 auto; padding: 24px 28px 80px; }

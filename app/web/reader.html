@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>講義</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#0f1117">
+<script src="pwa.js"></script>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="vendor/highlight-github-dark.min.css">
 <link rel="stylesheet" href="vendor/katex/katex.min.css">
@@ -62,11 +69,41 @@ const mdi = window.markdownit({ html: false, linkify: true, breaks: false,
 mermaid.initialize({ startOnLoad: false, theme: 'dark' });
 
 let unitData = null;
+let OFFLINE = false; // SW 回快取(X-Sw-Cache: hit)= 連不上 Mac
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
+  if (PWA.fromCache(r)) setOffline();
   if (!r.ok) throw new Error((await r.json().catch(()=>({}))).error || r.status);
   return r.json();
+}
+
+function setOffline() {
+  if (!OFFLINE) {
+    OFFLINE = true;
+    const b = document.createElement('span');
+    b.className = 'badge offline';
+    b.textContent = '離線';
+    document.getElementById('crumb').after(b);
+  }
+  applyOfflineUI();
+}
+
+// 冪等;selfcheck 卡片是非同步長出來的,長完後需要再跑一次
+function applyOfflineUI() {
+  document.querySelectorAll('.topbar [data-state]').forEach(b => {
+    b.disabled = true; b.title = '離線,需連上 Mac';
+  });
+  const send = document.getElementById('chatSend');
+  send.disabled = true; send.title = '離線,需連上 Mac';
+  const ta = document.getElementById('chatText');
+  ta.disabled = true; ta.placeholder = '離線,需連上 Mac 才能使用助教';
+  document.querySelectorAll('#selfcheck button.primary').forEach(b => {
+    b.disabled = true; b.title = '離線,需連上 Mac';
+  });
+  document.querySelectorAll('#selfcheck .result').forEach(r => {
+    if (!r.textContent) r.textContent = '離線,需連上 Mac 才能批改';
+  });
 }
 
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
@@ -103,6 +140,7 @@ function renderStateButtons(state) {
   document.querySelectorAll('.topbar [data-state]').forEach(b => {
     b.classList.toggle('active', b.dataset.state === state);
     b.onclick = async () => {
+      if (OFFLINE) return;
       await api('api/progress', { method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ course, unit, state: b.dataset.state }) });
       renderStateButtons(b.dataset.state);
@@ -145,7 +183,7 @@ async function renderSelfcheck() {
     const result = card.querySelector('.result');
     const fb = card.querySelector('.feedback');
     btn.onclick = async () => {
-      if (!ta.value.trim()) return;
+      if (OFFLINE || !ta.value.trim()) return;
       btn.disabled = true; result.textContent = '批改中…(本機 claude,約 10-30 秒)'; result.className = 'result thinking';
       try {
         const g = await api('api/selfcheck', { method: 'POST', headers: {'Content-Type':'application/json'},
@@ -170,6 +208,7 @@ async function renderSelfcheck() {
     };
     el.appendChild(card);
   }
+  if (OFFLINE) applyOfflineUI(); // 卡片長出來後補停用
 }
 
 // ---------- 助教對話 ----------
@@ -207,7 +246,7 @@ let nextNewSession = false;
 async function sendChat() {
   const ta = document.getElementById('chatText');
   const text = ta.value.trim();
-  if (!text || sending) return;
+  if (OFFLINE || !text || sending) return;
   const newSession = nextNewSession; nextNewSession = false;
   sending = true; ta.value = '';
   addMsg('user', text);

@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>學習中心</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0c1020" media="(prefers-color-scheme: dark)">
+<script src="pwa.js"></script>
 <script src="vendor/cytoscape.min.js"></script>
 <style>
   :root {
@@ -37,6 +45,9 @@
     padding: 0 2px 9px; cursor: pointer; color: var(--muted);
     border-bottom: 2px solid transparent; margin-bottom: -1px; }
   .hub-tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+  .off-badge { margin-left: auto; align-self: center; font-size: 11px; font-weight: 650;
+    color: var(--reading); background: var(--reading-soft); border-radius: 999px; padding: 2px 10px; }
+  .chip:disabled { opacity: .45; cursor: not-allowed; }
 
   .overall { margin-bottom: 20px; }
   .overall-line { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--muted);
@@ -157,6 +168,7 @@
 const CYCLE = { unread: 'reading', reading: 'done', done: 'unread' };
 const LABEL = { unread: '未讀', reading: '閱讀中', done: '已讀' };
 let COURSES = [], REDO = [];
+let OFFLINE = false; // 由 load() 依 SW 的 X-Sw-Cache 標頭判定
 let GRAPH = { edges: [] }; // /api/graph 的合併邊(手動 + 自動候選)
 let cy = null; // 圖譜 lazy init
 
@@ -179,6 +191,7 @@ function tabsHTML(cur) {
   return `<div class="hub-tabs">
     <button class="hub-tab ${cur === 'progress' ? 'on' : ''}" data-nav="">課程</button>
     <button class="hub-tab ${cur === 'graph' ? 'on' : ''}" data-nav="#/graph">圖譜</button>
+    ${OFFLINE ? '<span class="off-badge">離線瀏覽</span>' : ''}
   </div>`;
 }
 
@@ -236,7 +249,7 @@ function detailHTML(slug) {
   const rows = c.units.map((u, i) => `<li class="unit">
     <span class="u-no">${i + 1}</span>
     <a class="u-title ${u.state === 'done' ? 'is-done' : ''}" href="${readerUrl(c.slug, u.file)}" target="_blank" rel="noopener">${esc(u.title)}</a>
-    <button class="chip st-${u.state}" data-c="${esc(c.slug)}" data-u="${esc(u.file)}" type="button"><span class="dot"></span>${LABEL[u.state]}</button>
+    <button class="chip st-${u.state}" data-c="${esc(c.slug)}" data-u="${esc(u.file)}" type="button" ${OFFLINE ? 'disabled title="離線,需連上 Mac"' : ''}><span class="dot"></span>${LABEL[u.state]}</button>
   </li>`).join('');
   return `<a class="back" href="#">← 全部課程</a>
     <div class="detail-head"><h2>${esc(c.title)}</h2><span class="detail-count"><b>${c.done}</b> / ${c.total} 已讀</span></div>
@@ -387,13 +400,16 @@ function render() {
 
 async function load() {
   try {
-    const [c, redo, g] = await Promise.all([
-      fetch('api/courses', { cache: 'no-store' }).then(r => r.json()),
-      fetch('api/redo', { cache: 'no-store' }).then(r => r.json()),
-      fetch('api/graph', { cache: 'no-store' }).then(r => r.json()),
+    const rs = await Promise.all([
+      fetch('api/courses', { cache: 'no-store' }),
+      fetch('api/redo', { cache: 'no-store' }),
+      fetch('api/graph', { cache: 'no-store' }),
     ]);
+    OFFLINE = rs.some(r => PWA.fromCache(r));
+    const [c, redo, g] = await Promise.all(rs.map(r => r.json()));
     COURSES = c; REDO = redo; GRAPH = g;
     render();
+    if (!OFFLINE) PWA.syncContent(COURSES); // fire-and-forget:把單元內容抓進離線快取
   } catch (e) {
     document.getElementById('view').innerHTML =
       `<div class="error">讀不到課程資料(${esc(e.message)})。確認 learning-hub 服務有起來。</div>`;

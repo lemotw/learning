@@ -126,6 +126,16 @@
 概念萃取 + MaxSim(唯一排序全對,自帶證據)、指令式 embedding(qwen3-embedding,免後處理但壓不掉模糊邊)。
 結論與文獻一致:關係發現用 GraphRAG 式 schema-guided extraction + multi-vector late interaction 為主幹。
 
+## 離線閱讀(PWA)
+
+`app/web/sw.js` + `pwa.js` + `manifest.json`,零依賴、無 build,server 端只加了三個 MIME 型別:
+
+- **快取策略**:shell(html/css/pwa.js)stale-while-revalidate;vendor cache-first(換檔手動 bump `sw.js` 的 `CACHE_VERSION`);GET `api/*` network-first(4s timeout)斷線退快取;**非 GET 完全不攔**(進度/批改/助教 SSE 原生走網路)
+- **內容預下載**:index 在線載入後把全部單元的講義+自答歷史+助教對話抓一輪進快取(30 分鐘節流,單元數變動即重抓)
+- **離線判定**:SW 退快取時加 `X-Sw-Cache: hit` 標頭,頁面據此顯示離線徽章並停用助教/批改/進度按鈕(不用 `navigator.onLine`——手機有網路但不在 tailnet 時它會誤判)
+- 手機:以 ts.net HTTPS 造訪一次後即可離線閱讀;建議「加入主畫面」(iOS 對主畫面 App 豁免 7 天儲存回收)
+- 路徑全相對,根路徑與反代子路徑(`/learning/`)部署皆可
+
 ## 部署
 
 - launchd `com.lemotw.learning-hub`(開機自啟、崩潰重拉),port 4600
