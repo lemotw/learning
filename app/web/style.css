@@ -77,7 +77,22 @@ textarea:focus { outline: none; border-color: var(--accent); }
   display: flex; flex-direction: column; position: sticky; top: 45px; height: calc(100vh - 45px);
 }
 .chatpanel.collapsed { display: none; }
+/* 全螢幕對話:蓋掉 topbar(z-index 10),靠 header 的縮回鈕或 Esc 退出 */
+.chatpanel.full {
+  position: fixed; inset: 0; top: 0; width: 100%; height: 100dvh; z-index: 50;
+  border-left: 0;
+}
+/* 全螢幕下不讓文字撐滿整個螢幕寬——一行超過 80 幾個字就難讀了。
+   用 padding 而不是 max-width,分隔線才能保持整條到底 */
+.chatpanel.full .chatlog { padding-inline: max(12px, calc((100% - 820px) / 2)); }
+.chatpanel.full .chatinput { padding-inline: max(10px, calc((100% - 820px) / 2)); }
 .chatpanel header { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; font-size: 13px; }
+/* 標題與按鈕不參與收縮,寧可讓副標題被截掉也不要把按鈕擠變形 */
+.chatpanel header > b, .chatpanel header > button { flex: none; }
+/* 副標題只是說明文字:380px 側欄放不下(標題+三顆按鈕就吃滿了),直接不顯示,
+   全螢幕才拿出來。留 ellipsis 當保險,免得字數變多時又縮成一字一行 */
+.chat-sub { display: none; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chatpanel.full .chat-sub { display: block; flex: 0 1 auto; }
 .chatlog { flex: 1; overflow-y: auto; padding: 12px; }
 .msg { margin-bottom: 12px; font-size: 14px; line-height: 1.65; }
 .msg .who { font-size: 11px; color: var(--fg-dim); margin-bottom: 2px; }
@@ -109,6 +124,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
   }
   .chatpanel header { padding: 12px 14px; }
   .chatinput textarea { min-height: 48px; }
+  #chatFull { display: none; } /* 手機本來就是全螢幕覆蓋,這顆按鈕沒意義 */
 }
 
 /* index:圖 + 側欄 */

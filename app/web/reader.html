@@ -44,8 +44,9 @@
   <aside class="chatpanel collapsed" id="chatpanel">
     <header>
       <b>單元助教</b>
-      <span class="dim hide-sm" style="flex:1">知道你的診斷弱點與本單元內容</span>
+      <span class="dim chat-sub">知道你的診斷弱點與本單元內容</span>
       <span class="spacer"></span>
+      <button id="chatFull" title="切換全螢幕">⤢ 全螢幕</button>
       <button id="newChat" title="開新對話">＋新對話</button>
       <button id="chatClose" title="關閉">✕</button>
     </header>
@@ -220,13 +221,36 @@ const panel = document.getElementById('chatpanel');
 document.getElementById('chatToggle').onclick = () => panel.classList.toggle('collapsed');
 document.getElementById('chatClose').onclick = () => panel.classList.add('collapsed');
 
+// 全螢幕對話。上一/下一單元是整頁重新載入,狀態記在 localStorage 才不會每次都要重按。
+const fullBtn = document.getElementById('chatFull');
+function setFull(on) {
+  panel.classList.toggle('full', on);
+  fullBtn.textContent = on ? '⤡ 縮回' : '⤢ 全螢幕';
+  try { localStorage.setItem('chatFull', on ? '1' : '0'); } catch {}
+}
+setFull((() => { try { return localStorage.getItem('chatFull') === '1'; } catch { return false; } })());
+fullBtn.onclick = () => setFull(!panel.classList.contains('full'));
+document.addEventListener('keydown', (e) => {
+  // 全螢幕蓋住了 topbar,沒有 Esc 就只剩那顆縮回鈕可按
+  if (e.key === 'Escape' && panel.classList.contains('full')) setFull(false);
+});
+
+// 串流時只有「已經貼在底部」才跟著往下捲。
+// 原本每個 delta 都無條件 scrollTop = scrollHeight,使用者往上翻去看前面幾段時
+// 會被一直拉回底部,等於沒辦法邊讀邊等。往上滑就放手,滑回底部自動恢復跟隨。
+let stick = true;
+const atBottom = () => chatlog.scrollHeight - chatlog.scrollTop - chatlog.clientHeight < 40;
+chatlog.addEventListener('scroll', () => { stick = atBottom(); });
+const followBottom = () => { if (stick) chatlog.scrollTop = chatlog.scrollHeight; };
+const jumpBottom = () => { stick = true; chatlog.scrollTop = chatlog.scrollHeight; };
+
 function addMsg(role, text) {
   const d = document.createElement('div');
   d.className = 'msg ' + role;
   d.innerHTML = `<div class="who">${role === 'user' ? '你' : '助教'}</div><div class="bubble"></div>`;
   setMsgText(d, text, role);
   chatlog.appendChild(d);
-  chatlog.scrollTop = chatlog.scrollHeight;
+  jumpBottom();   // 新訊息(送出/載入歷史)一律跳到底,這是使用者自己的動作
   return d;
 }
 function setMsgText(el, text, role) {
@@ -240,7 +264,10 @@ async function loadChatHistory() {
     const h = await api(`api/chat/history?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
     for (const m of h.messages) addMsg(m.role, m.content);
     // 手機上不自動展開,避免一進頁面就蓋住講義
-    if (h.messages.length && window.matchMedia('(min-width: 821px)').matches) panel.classList.remove('collapsed');
+    if (h.messages.length && window.matchMedia('(min-width: 821px)').matches) {
+      panel.classList.remove('collapsed');
+      jumpBottom();   // 收合中的元素量不到高度,捲不動;展開後才有辦法定位到最新一則
+    }
   } catch {}
 }
 
@@ -273,14 +300,14 @@ async function sendChat() {
         const dataLine = (chunk.match(/^data: (.+)$/m) || [])[1];
         if (!ev || !dataLine) continue;
         const data = JSON.parse(dataLine);
-        if (ev === 'delta') { acc += data.text; setMsgText(holder, acc, 'assistant'); chatlog.scrollTop = chatlog.scrollHeight; }
+        if (ev === 'delta') { acc += data.text; setMsgText(holder, acc, 'assistant'); followBottom(); }
         if (ev === 'done') { setMsgText(holder, data.text || acc, 'assistant'); }
         if (ev === 'error') { setMsgText(holder, '⚠ ' + data.error, 'assistant'); }
       }
     }
   } catch (e) { setMsgText(holder, '⚠ ' + e.message, 'assistant'); }
   sending = false;
-  chatlog.scrollTop = chatlog.scrollHeight;
+  followBottom();
 }
 
 document.getElementById('chatSend').onclick = () => sendChat();
@@ -289,6 +316,7 @@ document.getElementById('chatText').addEventListener('keydown', (e) => {
 });
 document.getElementById('newChat').onclick = () => {
   chatlog.innerHTML = '';
+  stick = true;
   nextNewSession = true;
   const ta = document.getElementById('chatText');
   ta.placeholder = '新對話——第一則訊息會重新載入講義 context';
