@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>助教可選 agent（claude / pi）實作方案</title>
+<style>
+:root { --bg:#0f1117; --bg2:#161a23; --bg3:#1e2430; --fg:#d8dee9; --fg-dim:#8b93a7;
+  --accent:#7c6ff0; --accent2:#4fb3bf; --ok:#4caf7d; --warn:#e0a458; --err:#e06c75;
+  --border:#2a3140; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font:15px/1.75 -apple-system,"PingFang TC","Noto Sans TC",sans-serif; }
+main { max-width: 860px; margin: 0 auto; padding: 40px 22px 100px; }
+h1 { font-size:26px; line-height:1.35; margin:0 0 24px; }
+h2 { font-size:20px; margin:44px 0 14px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+h3 { font-size:16px; margin:28px 0 10px; color:var(--accent2); }
+p, ul, ol { margin: 0 0 14px; }
+li { margin-bottom: 5px; }
+a { color: var(--accent2); }
+code { background:var(--bg3); padding:1.5px 5px; border-radius:4px; font-size:12.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+pre { background:#11151c; border:1px solid var(--border); border-radius:8px;
+  padding:12px 14px; overflow-x:auto; font-size:12.5px; line-height:1.6; }
+pre code { background:none; padding:0; font-size:inherit; }
+blockquote { margin:0 0 16px; padding:10px 16px; border-left:3px solid var(--accent);
+  background:var(--bg2); color:var(--fg-dim); border-radius:0 6px 6px 0; }
+blockquote p:last-child { margin-bottom: 0; }
+/* 寬表格自己捲,不要讓整頁橫向捲動 */
+.tw { overflow-x:auto; margin:0 0 18px; }
+table { border-collapse:collapse; width:100%; font-size:13.5px; }
+th, td { border:1px solid var(--border); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--bg3); font-weight:650; white-space:nowrap; }
+tr:nth-child(even) td { background:rgba(255,255,255,.015); }
+hr { border:0; border-top:1px solid var(--border); margin:36px 0; }
+strong { color:#fff; }
+.meta { color:var(--fg-dim); font-size:12.5px; margin:-14px 0 30px; }
+@media (max-width:600px) { main { padding:26px 14px 70px; } h1 { font-size:22px; } }
+</style>
+</head>
+<body>
+<main>
+<h1>助教可選 agent（claude / pi）實作方案</h1>
+<blockquote>
+<p>狀態：<strong>方案，未實作</strong>。以下所有「實測」標記的結論都在 2026-07-27 於本機驗證過；
+其餘為設計提案。批改（selfcheck grading）不在本方案範圍，維持走 claude。</p>
+</blockquote>
+<hr>
+<h2>1. 為什麼要做</h2>
+<p>現在 <code>app/lib/chat.js</code> 把後端寫死成本機 <code>claude</code> CLI headless（<code>-p --output-format stream-json</code>），
+多輪靠 <code>--resume &lt;session_id&gt;</code>。單元助教只有這一條路。</p>
+<p>本機另外裝了 <code>pi</code>（<code>/opt/homebrew/bin/pi</code>，v0.80.6），是另一套 agent CLI，
+能力邊界與模型選擇都不同。想讓助教可以切換，等於多一個「換一顆腦袋問同一份講義」的選項。</p>
+<hr>
+<h2>2. 實測結論：pi 接得起來</h2>
+<p>四項關鍵能力都驗過，不是推測。</p>
+<h3>2.1 串流格式對得上（實測）</h3>
+<pre><code class="language-bash">pi -p --mode json --no-tools --no-session --no-extensions --no-skills &quot;回答兩個字:測試&quot;
+</code></pre>
+<p>吐 NDJSON，每行一個事件。文字增量在：</p>
+<pre><code>message_update → assistantMessageEvent.type === 'text_delta' → .delta
+</code></pre>
+<p>事件序列：<code>session</code> → <code>agent_start</code> → <code>turn_start</code> → <code>message_start</code>(user) →
+<code>message_end</code>(user) → <code>message_start</code>(assistant) → <code>message_update</code>×N →
+<code>message_end</code> → <code>turn_end</code> → <code>agent_end</code> → <code>agent_settled</code>。</p>
+<p>對照現在 claude 的 <code>stream-json</code>，兩者都是「一行一個 JSON 事件、逐 token 吐 delta」，
+差別只在欄位路徑。<strong>一個 adapter 就能收斂成同一個 <code>onDelta(text)</code> 介面。</strong></p>
+<h3>2.2 固定 session id 可續聊（實測）</h3>
+<p><code>--session-id &lt;id&gt;</code> 的語意是「用這個 id，不存在就建」。兩次<strong>獨立的 process 呼叫</strong>：</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>呼叫</th>
+<th>輸入</th>
+<th>回應</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>--session-id learning-k8s-05 &quot;記住數字 4173,只回 ok&quot;</code></td>
+<td><code>ok</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>--session-id learning-k8s-05 &quot;剛剛叫你記的數字?只回數字&quot;</code></td>
+<td><strong><code>4173</code></strong></td>
+</tr>
+</tbody>
+</table></div>
+<p>記憶跨 process 保住了。</p>
+<p><strong>這件事的意義</strong>：session id 可以由 <code>course + unit</code> 直接推導，不必等 CLI 回傳再存。
+也就是說走 pi 這條路時，<code>chat_sessions</code> 表在功能上是多餘的
+（但<strong>仍要保留</strong>，理由見 §4.2）。</p>
+<h3>2.3 session 是可讀的 jsonl（實測）</h3>
+<pre><code>~/.pi/agent/sessions/&lt;escaped-cwd&gt;/&lt;ISO時間&gt;_&lt;uuid&gt;.jsonl
+</code></pre>
+<p>每行一個帶 <code>type</code> 的物件：<code>session</code>（含 <code>cwd</code>/<code>id</code>/<code>version</code>）、
+<code>session_info</code>（含自動產生的 <code>name</code> 標題）、<code>message</code>、<code>model_change</code>、
+<code>thinking_level_change</code>。</p>
+<p><code>message</code> 行的 <code>message.role</code> 有三種：<code>user</code> / <code>assistant</code> / <strong><code>toolResult</code></strong>。
+content 是 parts 陣列（<code>[{type:'text', text:'...'}]</code>）。</p>
+<p>目錄名是 escaped cwd → <strong>session 綁 cwd</strong>。<code>--session-dir &lt;dir&gt;</code> 可覆寫
+（實測有效，優先序：<code>--session-dir</code> &gt; <code>PI_CODING_AGENT_SESSION_DIR</code> &gt; <code>&lt;agentDir&gt;/sessions</code>）。</p>
+<h3>2.4 有現成參考實作</h3>
+<p><code>~/lemo/repo/archived/pi-web</code>（Go，自己封存的）就是 pi 的 web UI。可直接抄的部分：</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>檔案</th>
+<th>內容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>internal/rpc/prompt.go:44</code></td>
+<td>一次性提問的旗標組合：<code>--mode rpc --no-session --no-tools --no-extensions --no-context-files</code></td>
+</tr>
+<tr>
+<td><code>internal/rpc/worker.go:72</code></td>
+<td>長駐 <code>pi --mode rpc</code> worker pool，省掉每輪 spawn 冷啟動</td>
+</tr>
+<tr>
+<td><code>internal/sessions/</code></td>
+<td>session jsonl reader</td>
+</tr>
+<tr>
+<td><code>internal/agentdir/agentdir.go</code></td>
+<td>session dir 優先序的處理</td>
+</tr>
+</tbody>
+</table></div>
+<blockquote>
+<p>註：<code>--mode rpc</code> 是長駐雙向協定，<code>--mode json</code> 是一次性。
+本方案用 <code>json</code> 就夠 —— 現在 chat.js 也是每輪 spawn，沒有比現況差。</p>
+</blockquote>
+<hr>
+<h2>3. 必須先接受的兩個差異</h2>
+<h3>3.1 模型會變，而且不受本專案控制</h3>
+<p>實測那次 pi 跑的是 <strong><code>openai-codex</code> / <code>gpt-5.6-terra</code></strong>（pi 的 <code>--provider</code> 預設是
+<code>google</code>，實際落點由使用者的 pi 設定決定）。</p>
+<p>而 <code>app/lib/chat.js</code> 上一版才刻意把模型釘死：</p>
+<pre><code class="language-js">const CHAT_MODEL  = process.env.CHAT_MODEL  || 'claude-sonnet-5';
+const GRADE_MODEL = process.env.GRADE_MODEL || 'claude-sonnet-5'; // 固定模型讓評分標準穩定
+</code></pre>
+<p><strong>結論：助教可以接 pi，批改不要。</strong> 批改要的是跨時間可比的評分標準，
+換模型等於毀掉那個保證。本方案完全不動 <code>gradeAnswer()</code>。</p>
+<h3>3.2 session 不能跨 agent 續聊</h3>
+<p>claude 的 session 在 <code>~/.claude/projects/</code>，pi 的在 <code>~/.pi/agent/sessions/</code>，
+格式與 id 空間都不同。<strong>用 claude 開的對話無法交給 pi 續聊，反之亦然。</strong></p>
+<p>所以「切換 agent」的正確語意是<strong>開一段新對話</strong>，不是接著聊。
+UI 必須把這件事講清楚，否則使用者會以為助教突然失憶。</p>
+<hr>
+<h2>4. 實作方案</h2>
+<h3>4.1 新增 <code>app/lib/agents.js</code>：driver registry</h3>
+<p>把「怎麼叫起一個 agent」抽成 driver，<code>chat.js</code> 只保留 claude driver 的內容並改為被註冊。</p>
+<pre><code class="language-js">// app/lib/agents.js
+// 每個 driver 提供 stream({ message, systemPrompt, resume, onDelta }) → { sessionId, text }
+// resume 的型別由 driver 自己解讀:claude 是 CLI 給的 UUID,pi 是我們自己命名的 id。
+
+const AGENTS = {
+  claude: {
+    label: 'Claude',
+    note: '預設。模型釘在 claude-sonnet-5,口吻與批改一致。',
+    stream: require('./drivers/claude').stream,
+  },
+  pi: {
+    label: 'pi',
+    note: '本機 pi CLI,模型由你的 pi 設定決定(實測落在 gpt-5.6-terra)。',
+    stream: require('./drivers/pi').stream,
+  },
+};
+
+function available() {
+  // pi 沒裝就不要出現在選單裡。用 which 探一次,結果快取在 module scope。
+  ...
+}
+</code></pre>
+<p><strong>pi driver 的參數</strong>（對齊現在 claude driver 的「助教不碰工具」原則）：</p>
+<pre><code class="language-js">const args = [
+  '-p', '--mode', 'json',
+  '--no-tools', '--no-extensions', '--no-skills', '--no-context-files',
+  '--session-dir', PI_SESSION_DIR,          // app/data/pi-sessions,自己管不跟著 cwd 跑
+  '--session-id', sessionIdFor(course, unit, seq),
+];
+if (systemPrompt) args.push('--append-system-prompt', systemPrompt);
+</code></pre>
+<ul>
+<li><code>--no-context-files</code> 一定要加：不然 pi 會去讀專案的 <code>AGENTS.md</code> / <code>CLAUDE.md</code>，
+那些是給 coding agent 的指令，不該污染助教的 context。</li>
+<li><code>--session-dir</code> 指到 <code>app/data/pi-sessions</code>：server 的 cwd 不保證固定，
+用預設路徑會讓 session 散在不同 escaped-cwd 目錄下。</li>
+<li>session id 命名：<code>learning-&lt;course&gt;-&lt;unit 去掉 .md&gt;-&lt;seq&gt;</code>，
+<code>seq</code> 是該單元第幾段對話（對應「＋新對話」）。</li>
+</ul>
+<p><strong>delta 解析</strong>：</p>
+<pre><code class="language-js">if (ev.type === 'message_update') {
+  const e = ev.assistantMessageEvent;
+  if (e &amp;&amp; e.type === 'text_delta' &amp;&amp; e.delta) onDelta(e.delta);
+}
+if (ev.type === 'message_end' &amp;&amp; ev.message.role === 'assistant') {
+  finalText = ev.message.content.filter(c =&gt; c.type === 'text').map(c =&gt; c.text).join('');
+}
+</code></pre>
+<blockquote>
+<p><code>message.content</code> 裡的 <code>textSignature</code> 欄位是 provider 的內部簽章，直接忽略。
+若哪天開了 tools，<code>role === 'toolResult'</code> 的訊息也要在這裡濾掉。</p>
+</blockquote>
+<h3>4.2 DB：<code>chat_sessions</code> 加一欄 <code>agent</code></h3>
+<p><strong>保留 <code>chat_sessions</code> 表</strong>，即使 pi 的 session id 可推導 —— 因為要記「這段對話是哪個
+agent 開的」。沒有這欄，重新載入頁面後就無法決定該用哪個 driver 續聊。</p>
+<pre><code class="language-sql">ALTER TABLE chat_sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude';
+</code></pre>
+<p><code>db.js</code> 現在是用 <code>CREATE TABLE IF NOT EXISTS</code> 開場，加欄位要另外處理既有 DB
+（目前有 27 筆 session、170 則訊息，全部是 claude 開的，所以 <code>DEFAULT 'claude'</code> 正確）：</p>
+<pre><code class="language-js">// 冪等 migration:欄位已存在就跳過
+const cols = db.prepare('PRAGMA table_info(chat_sessions)').all().map(c =&gt; c.name);
+if (!cols.includes('agent')) {
+  db.exec(&quot;ALTER TABLE chat_sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude'&quot;);
+}
+</code></pre>
+<p><code>addChatSession(course, unit, sessionId, agent)</code> 加第四個參數；
+<code>latestChatSession()</code> 回傳值多帶 <code>agent</code>。</p>
+<h3>4.3 Server：<code>/api/chat</code> 收 <code>agent</code> 參數</h3>
+<p><code>app/server.js:236</code> 的 POST handler：</p>
+<pre><code class="language-js">const { course, unit, message, newSession, agent } = await readBody(req);
+const prev = newSession ? null : store.latestChatSession(course, unit);
+
+// 切 agent 等於開新對話 —— session 不能跨 agent 續聊(§3.2)
+const use = agent || (prev ? prev.agent : 'claude');
+const resume = (prev &amp;&amp; prev.agent === use) ? prev.session_id : null;
+
+const { sessionId, text } = await agents.get(use).stream({
+  message,
+  resume,
+  systemPrompt: resume ? null : tutorSystemPrompt(course, unit, raw),
+  onDelta: (t) =&gt; send('delta', { text: t }),
+});
+if (!resume &amp;&amp; sessionId) store.addChatSession(course, unit, sessionId, use);
+</code></pre>
+<p>這段的關鍵是 <code>resume</code> 的判斷條件：<code>prev.agent === use</code>。
+使用者換 agent 時 <code>resume</code> 變 <code>null</code> → 自動帶上 <code>systemPrompt</code> 重開一段，
+不會拿 claude 的 session id 去餵 pi。</p>
+<p>另外加一個 endpoint 讓前端知道有哪些選項（pi 沒裝就不該出現在選單）：</p>
+<pre><code>GET /api/agents → [{ id, label, note, available }]
+</code></pre>
+<h3>4.4 前端：選單放哪裡</h3>
+<p><code>reader.html</code> 的對話 panel header 已經很擠 —— 380px 側欄裡
+<code>單元助教</code> + 三顆按鈕就吃掉約 283px，之前副標題就是被擠成一字一行才修掉的。
+<strong>不要再往 header 塞東西。</strong></p>
+<p>改放在 header 下面獨立一列（跟規劃中的「歷史 session 選單」共用這一列）：</p>
+<pre><code class="language-html">&lt;div class=&quot;chatbar&quot; id=&quot;chatBar&quot;&gt;
+  &lt;select id=&quot;agentPick&quot; title=&quot;選擇助教 agent&quot;&gt;&lt;/select&gt;
+  &lt;select id=&quot;sessPick&quot; title=&quot;切換歷史對話&quot;&gt;&lt;/select&gt;
+&lt;/div&gt;
+</code></pre>
+<pre><code class="language-css">.chatbar { display: flex; align-items: center; gap: 8px;
+           padding: 6px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.chatbar[hidden] { display: none; }   /* display:flex 會蓋掉 hidden,必須明寫 */
+</code></pre>
+<p>行為：</p>
+<ul>
+<li>只有一個 agent 可用（pi 沒裝）時整列的 agent 選單隱藏，不要給假選擇。</li>
+<li>選單值存 <code>localStorage</code>（跟 <code>chatFull</code> 一樣）—— 上一/下一單元是整頁重新載入。</li>
+<li><strong>切換 agent 時要明確提示會開新對話</strong>，直接在 chatlog 插一則系統訊息比 alert 好：
+<code>── 已切換到 pi,以下是新的一段對話 ──</code></li>
+<li>送出時把當前選擇一起帶：<code>body: JSON.stringify({ course, unit, message, newSession, agent })</code></li>
+</ul>
+<hr>
+<h2>5. 動到的檔案</h2>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>檔案</th>
+<th>動作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>app/lib/agents.js</code></td>
+<td><strong>新增</strong> — driver registry + 可用性偵測</td>
+</tr>
+<tr>
+<td><code>app/lib/drivers/claude.js</code></td>
+<td><strong>新增</strong> — 從現在的 <code>chat.js</code> 搬出 <code>streamChat()</code></td>
+</tr>
+<tr>
+<td><code>app/lib/drivers/pi.js</code></td>
+<td><strong>新增</strong> — <code>--mode json</code> 解析 + session id 命名</td>
+</tr>
+<tr>
+<td><code>app/lib/chat.js</code></td>
+<td>縮成只留 <code>gradeAnswer()</code>（批改，不動邏輯）</td>
+</tr>
+<tr>
+<td><code>app/lib/db.js</code></td>
+<td><code>chat_sessions</code> 加 <code>agent</code> 欄 + 冪等 migration</td>
+</tr>
+<tr>
+<td><code>app/server.js</code></td>
+<td>POST <code>/api/chat</code> 收 <code>agent</code>；新增 GET <code>/api/agents</code></td>
+</tr>
+<tr>
+<td><code>app/web/reader.html</code></td>
+<td><code>.chatbar</code> 一列 + agent 選單 + 送出帶 agent</td>
+</tr>
+<tr>
+<td><code>app/web/style.css</code></td>
+<td><code>.chatbar</code> 樣式</td>
+</tr>
+</tbody>
+</table></div>
+<p>不動：<code>gradeAnswer()</code> 的行為、<code>selfcheck_attempts</code>、<code>redoQueue()</code>、圖譜與計分頁。</p>
+<hr>
+<h2>6. 風險與未決</h2>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>項目</th>
+<th>狀況</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>pi 的模型不可控</td>
+<td>由使用者 pi 設定決定，本專案無法保證。UI 的 <code>note</code> 要寫明。</td>
+</tr>
+<tr>
+<td>冷啟動延遲</td>
+<td>每輪 spawn 一次 pi。實測單輪可接受，但比 claude 慢多少<strong>沒量過</strong>。若成為問題，抄 pi-web 的 <code>--mode rpc</code> worker pool。</td>
+</tr>
+<tr>
+<td>pi session 的 GC</td>
+<td>不知道 pi 是否會自行清理舊 session 檔。若會，續聊會失敗 → driver 需要 fallback 成開新對話。<strong>未驗證。</strong></td>
+</tr>
+<tr>
+<td>錯誤格式</td>
+<td>pi 失敗時吐什麼還沒測（只測過成功路徑）。<code>--mode json</code> 的 error 事件形狀需補驗。</td>
+</tr>
+<tr>
+<td><code>toolResult</code></td>
+<td>目前 <code>--no-tools</code>，不會出現。開了才要處理。</td>
+</tr>
+<tr>
+<td>成本</td>
+<td>實測一次極短對話 $0.00103（376 in / 6 out）。pi 走使用者自己的 provider 帳單，不經本專案。</td>
+</tr>
+</tbody>
+</table></div>
+<hr>
+<h2>7. 建議的實作順序</h2>
+<ol>
+<li><strong>先抽 driver 但不加 pi</strong> —— 把 <code>chat.js</code> 的 <code>streamChat()</code> 搬到
+<code>drivers/claude.js</code>、建 registry，行為完全不變。這步可以獨立驗證沒改壞現況。</li>
+<li><code>db.js</code> migration + <code>/api/chat</code> 收 <code>agent</code>（值只可能是 <code>claude</code>）。仍然行為不變。</li>
+<li>加 <code>drivers/pi.js</code>，用 CLI 手動驗一輪 → 再接上 <code>/api/agents</code> 與前端選單。</li>
+<li>補 §6 那三項未驗證：pi 的 error 事件、session GC、冷啟動延遲。</li>
+</ol>
+<p>前兩步是純重構，出事範圍可控；第 3 步才真的引入新行為。</p>
+<p class="meta">來源:docs/pi-agent-tutor.md · 產出:2026-07-26 18:02</p>
+</main>
+</body>
+</html>
