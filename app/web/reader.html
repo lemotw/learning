@@ -22,7 +22,7 @@
 </head>
 <body>
 <div class="topbar">
-  <a href="./">← 課程</a>
+  <a id="backLink" href="./">← 課程</a>
   <span id="crumb" class="dim crumb"></span>
   <span class="spacer"></span>
   <span class="dim hide-sm">狀態:</span>
@@ -60,6 +60,9 @@
 <script>
 const qs = new URLSearchParams(location.search);
 const course = qs.get('course'), unit = qs.get('unit');
+// 回上一頁要回到這門課的專頁,不是首頁。講義是開在新分頁的,沒有 history 可退,
+// 只能自己組 hash;course 缺了(不該發生)才退回首頁。
+document.getElementById('backLink').href = course ? `./#/c/${encodeURIComponent(course)}` : './';
 const mdi = window.markdownit({ html: false, linkify: true, breaks: false,
   highlight: (str, lang) => {
     if (lang === 'mermaid') return '<div class="mermaid">' + str.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>';

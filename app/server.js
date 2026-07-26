@@ -138,6 +138,7 @@ async function handleApi(req, res, url) {
       }
     }
     // 自動候選邊(pipeline/relations.js 產出);手動邊優先,同配對不重複
+    let scorers = null, defaultScorer = null;
     try {
       const auto = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'graph-auto.json'), 'utf8'));
       for (const e of auto.edges || []) {
@@ -146,8 +147,15 @@ async function handleApi(req, res, url) {
         edges.push({ source: e.a, target: e.b, type: 'related', origin: 'auto',
           score: e.score, why: e.why || '', evidence: e.evidence || [] });
       }
+      // 計分方式比較(供 #/scoring 檢視頁;只出還存在的課)
+      if (auto.scorers) {
+        defaultScorer = auto.defaultScorer || 'maxsim';
+        scorers = Object.fromEntries(Object.entries(auto.scorers).map(([id, s]) => [id, {
+          ...s, pairs: (s.pairs || []).filter(p => known.has(p.a) && known.has(p.b)),
+        }]));
+      }
     } catch { /* 沒有 auto 檔就只出手動邊 */ }
-    return json(res, 200, { nodes, edges });
+    return json(res, 200, { nodes, edges, scorers, defaultScorer });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/unit') {

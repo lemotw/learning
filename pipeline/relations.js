@@ -120,6 +120,84 @@ async function embedBatch(texts) {
   }
   pairs.sort((x, y) => y.score - x.score);
 
+  // ---- 另外四種計分方式(僅供 /#/scoring 檢視頁比較,不影響上面的預設邊)----
+  //   全部在同一組 centering 後的向量上算,差別只在「怎麼把 12x12 個配對分數縮成一個數」。
+  const combos = [];
+  for (let i = 0; i < active.length; i++)
+    for (let j = i + 1; j < active.length; j++) combos.push([active[i], active[j]]);
+
+  const crossPairs = (a, b) => {
+    const out = [];
+    for (const x of byCourse[a]) for (const y of byCourse[b])
+      out.push({ from: x.name, to: y.name, score: cos(vec[x.key], vec[y.key]) });
+    return out;
+  };
+  const centroidOf = a => {
+    const g = new Array(dim).fill(0);
+    for (const c of byCourse[a]) { const v = vec[c.key]; for (let i = 0; i < dim; i++) g[i] += v[i] / byCourse[a].length; }
+    return g;
+  };
+  const centroids = Object.fromEntries(active.map(s => [s, centroidOf(s)]));
+  const r3 = x => Number(x.toFixed(3));
+  // 證據:概念配對(橋樑型)
+  const pairItems = list => [...list].sort((x, y) => y.score - x.score)
+    .slice(0, 3).map(e => ({ label: `${e.from} ↔ ${e.to}`, score: r3(e.score) }));
+  // 證據:各自最靠近「對方整團中心」的概念(交融型;不宣稱一對一對應)
+  const bridgeItems = (a, b) => {
+    const near = (side, ct) => byCourse[side].map(c => ({ label: c.name, score: cos(vec[c.key], ct) }))
+      .sort((x, y) => y.score - x.score).slice(0, 3).map(o => ({ label: o.label, score: r3(o.score) }));
+    return [...near(a, centroids[b]), ...near(b, centroids[a])];
+  };
+
+  const rawScores = {
+    maxsim: Object.fromEntries(pairs.map(p => [`${p.a}|${p.b}`, p.score])),
+    centroid: {}, allmean: {}, top3: {},
+  };
+  for (const [a, b] of combos) {
+    const cp = crossPairs(a, b), k = `${a}|${b}`;
+    rawScores.centroid[k] = cos(centroids[a], centroids[b]);
+    rawScores.allmean[k] = cp.reduce((t, e) => t + e.score, 0) / cp.length;
+    rawScores.top3[k] = [...cp].sort((x, y) => y.score - x.score).slice(0, 3)
+      .reduce((t, e) => t + e.score, 0) / 3;
+  }
+  // z 分數取大:兩種尺度各自標準化後取較大者(橋樑型與交融型都抓得到)
+  const zOf = m => {
+    const vals = Object.values(m), mu = vals.reduce((t, x) => t + x, 0) / vals.length;
+    const sd = Math.sqrt(vals.reduce((t, x) => t + (x - mu) ** 2, 0) / vals.length) || 1;
+    return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, (v - mu) / sd]));
+  };
+  const zM = zOf(rawScores.maxsim), zC = zOf(rawScores.centroid);
+  rawScores.zmax = Object.fromEntries(combos.map(([a, b]) => {
+    const k = `${a}|${b}`; return [k, Math.max(zM[k], zC[k])];
+  }));
+
+  const key = (a, b) => (rawScores.maxsim[`${a}|${b}`] !== undefined ? `${a}|${b}` : `${b}|${a}`);
+  const SCORER_DEF = [
+    ['maxsim',   'MaxSim(現行)',   '每個概念到對面找最像的取分、雙向平均。只看得到「最像的那一對」,所以只認得橋樑型關聯。', 'pair'],
+    ['centroid', '重心 cos',        '兩門課各自的概念重心,直接算夾角。看得到整體重疊(交融型),但看不見窄橋。',        'bridge'],
+    ['allmean',  '全配對平均',      '所有跨課概念配對的平均。最平滑,但會被大量不相干配對稀釋。',                      'pair'],
+    ['top3',     'Top-3 平均',      '取最像的三對取平均。介於 MaxSim 與全平均之間,比單一最大值穩一點。',              'pair'],
+    ['zmax',     'z 分數取大',      'MaxSim 與重心各自標準化後取大值,兩型關聯都想抓。代價:分數是相對的,加課會全部重算。', 'pair'],
+  ];
+  const scorers = {};
+  for (const [id, label, note, kind] of SCORER_DEF) {
+    const list = combos.map(([a, b]) => {
+      const k = key(a, b), score = rawScores[id][k];
+      const items = kind === 'bridge' ? bridgeItems(a, b) : pairItems(crossPairs(a, b));
+      const why = kind === 'bridge'
+        ? '兩邊都在談:' + items.slice(0, 2).map(i => i.label).join('、') + ' ｜ ' + items.slice(3, 5).map(i => i.label).join('、')
+        : '概念呼應:' + items.slice(0, 2).map(i => i.label).join('、');
+      return { a, b, score: Number(score.toFixed(4)), evidence: items, why, manual: manual.has([a, b].sort().join('|')) };
+    }).sort((x, y) => y.score - x.score);
+    // 該計分方式自己的空隙切點(第幾名之後落差最大)
+    let gAt = 0, gMax = -Infinity;
+    for (let i = 0; i < list.length - 1; i++) {
+      const g = list[i].score - list[i + 1].score;
+      if (g > gMax) { gMax = g; gAt = i; }
+    }
+    scorers[id] = { label, note, kind, gapCut: gAt + 1, gapSize: Number(gMax.toFixed(4)), pairs: list };
+  }
+
   // ---- 空隙偵測選邊 ----
   let gapAt = 0, gap = -1;
   for (let i = 0; i < pairs.length - 1; i++) {
@@ -142,6 +220,8 @@ async function embedBatch(texts) {
     method: 'concept-maxsim(centering + gap-detection)',
     edges,
     allPairs: pairs.map(p => ({ a: p.a, b: p.b, score: Number(p.score.toFixed(3)) })),
+    defaultScorer: 'maxsim',
+    scorers,
   }, null, 2));
 
   console.log(`\n候選邊 ${edges.length} 條(空隙 ${gap.toFixed(3)} 在第 ${gapAt + 1} 名後;手動邊配對已排除):`);

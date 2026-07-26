@@ -6,7 +6,8 @@ const path = require('node:path');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
-const CHAT_MODEL = process.env.CHAT_MODEL || ''; // 空 = 用使用者預設模型
+const CHAT_MODEL = process.env.CHAT_MODEL || 'claude-sonnet-5';   // 助教對話
+const GRADE_MODEL = process.env.GRADE_MODEL || 'claude-sonnet-5'; // 自答題批改;固定模型讓評分標準穩定
 const TIMEOUT_MS = 240_000;
 
 // 助教不該碰任何工具:唯讀查課程檔也不必要,context 已在 system prompt 裡
@@ -16,9 +17,9 @@ const NO_TOOLS = [
   'Task', 'Agent', 'TodoWrite', 'Read', 'Glob', 'Grep',
 ];
 
-function baseArgs() {
+function baseArgs(model = CHAT_MODEL) {
   const a = [...NO_TOOLS];
-  if (CHAT_MODEL) a.push('--model', CHAT_MODEL);
+  if (model) a.push('--model', model);
   return a;
 }
 
@@ -95,7 +96,7 @@ async function streamChat({ message, systemPrompt, resumeSessionId, onDelta }) {
 
 /** 一次性呼叫(自答題批改用),不留 session。resolve 純文字結果 */
 async function oneShot(prompt, { timeoutMs } = {}) {
-  const args = ['-p', '--output-format', 'json', '--no-session-persistence', ...baseArgs(), '--', prompt];
+  const args = ['-p', '--output-format', 'json', '--no-session-persistence', ...baseArgs(GRADE_MODEL), '--', prompt];
   const { stdout } = await run(args, { timeoutMs });
   const parsed = JSON.parse(stdout);
   if (typeof parsed.result !== 'string') throw new Error('unexpected claude output');

@@ -126,6 +126,12 @@
   .cy-wrap { position: relative; }
   #cy { height: calc(100vh - 220px); min-height: 460px; border: 1px solid var(--line);
     border-radius: 16px; background: var(--panel); }
+  /* 浮在畫布右上的版面控制:節點被拖亂 / 展開後跑出畫面時用來救回來 */
+  .cy-tools { position: absolute; z-index: 15; top: 10px; right: 10px; display: flex; gap: 6px; }
+  .cy-tools button { font: inherit; font-size: 12px; padding: 5px 10px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+    cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.10); }
+  .cy-tools button:hover { color: var(--text); border-color: var(--accent); }
   .cy-tip {
     position: absolute; z-index: 20; max-width: 280px; pointer-events: none;
     background: var(--panel); color: var(--text); border: 1px solid var(--line);
@@ -155,6 +161,42 @@
   .error { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
     padding: 16px; color: var(--muted); font-size: 13px; }
   footer { margin-top: 20px; color: var(--muted); font-size: 12px; text-align: right; }
+
+  /* ---- 計分方式比較頁 ---- */
+  .sc-ctrl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px; }
+  .sc-ctrl label { font-size: 12.5px; color: var(--muted); font-weight: 650; }
+  .sc-ctrl select { font: inherit; font-size: 13px; padding: 5px 9px; border-radius: 9px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .sc-ctrl input[type=range] { width: 160px; accent-color: var(--accent); }
+  .sc-ctrl .val { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 2.4em; }
+  .sc-ctrl .hintbtn { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--accent-soft); color: var(--accent);
+    font-weight: 650; cursor: pointer; }
+  .sc-note { font-size: 12.5px; color: var(--muted); line-height: 1.65; margin: 9px 2px 0; }
+
+  .sc-groups { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; }
+  .sc-group { border: 1px solid var(--line); border-radius: 14px; background: var(--panel);
+    padding: 10px 14px; min-width: 150px; }
+  .sc-group .gh { font-size: 11px; letter-spacing: .1em; font-weight: 700; margin-bottom: 5px;
+    display: flex; align-items: center; gap: 6px; }
+  .sc-group .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .sc-group .gm { font-size: 13px; line-height: 1.7; }
+  .sc-group.solo .gh { color: var(--muted); }
+
+  #cy2 { height: 380px; border: 1px solid var(--line); border-radius: 16px;
+    background: var(--panel); margin-top: 16px; }
+
+  .sc-tbl { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 16px; }
+  .sc-tbl th { text-align: left; font-size: 11px; letter-spacing: .08em; color: var(--muted);
+    font-weight: 700; padding: 0 10px 6px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .sc-tbl td { padding: 7px 10px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .sc-tbl td.n { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 650; }
+  .sc-tbl tr.kept td { background: var(--accent-soft); }
+  .sc-tbl tr.cutline td { padding: 0; border-bottom: 2px dashed var(--accent); }
+  .sc-tbl .ev { color: var(--muted); font-size: 12px; line-height: 1.55; }
+  .sc-tbl .mflag { font-size: 10.5px; font-weight: 700; color: var(--done);
+    background: var(--done-soft); border-radius: 999px; padding: 1px 7px; margin-left: 6px; }
 </style>
 </head>
 <body>
@@ -184,6 +226,7 @@ function route() {
   const h = location.hash;
   if (h.startsWith('#/c/')) return { page: 'detail', slug: decodeURIComponent(h.slice(4)) };
   if (h === '#/graph') return { page: 'graph' };
+  if (h === '#/scoring') return { page: 'scoring' };
   return { page: 'overview' };
 }
 
@@ -191,6 +234,7 @@ function tabsHTML(cur) {
   return `<div class="hub-tabs">
     <button class="hub-tab ${cur === 'progress' ? 'on' : ''}" data-nav="">課程</button>
     <button class="hub-tab ${cur === 'graph' ? 'on' : ''}" data-nav="#/graph">圖譜</button>
+    <button class="hub-tab ${cur === 'scoring' ? 'on' : ''}" data-nav="#/scoring">計分比較</button>
     ${OFFLINE ? '<span class="off-badge">離線瀏覽</span>' : ''}
   </div>`;
 }
@@ -251,7 +295,9 @@ function detailHTML(slug) {
     <a class="u-title ${u.state === 'done' ? 'is-done' : ''}" href="${readerUrl(c.slug, u.file)}" target="_blank" rel="noopener">${esc(u.title)}</a>
     <button class="chip st-${u.state}" data-c="${esc(c.slug)}" data-u="${esc(u.file)}" type="button" ${OFFLINE ? 'disabled title="離線,需連上 Mac"' : ''}><span class="dot"></span>${LABEL[u.state]}</button>
   </li>`).join('');
-  return `<a class="back" href="#">← 全部課程</a>
+  // 課程專頁保留頂部 tab:進到一門課還是在「課程」這個分頁裡,只是看得更細,
+  // 沒理由把切到圖譜/計分的入口收掉。真正離開 hub 的只有講義(reader.html)。
+  return tabsHTML('progress') + `<a class="back" href="#">← 全部課程</a>
     <div class="detail-head"><h2>${esc(c.title)}</h2><span class="detail-count"><b>${c.done}</b> / ${c.total} 已讀</span></div>
     <div class="detail-meta">
       <span class="last-read">${last}</span>
@@ -262,15 +308,27 @@ function detailHTML(slug) {
 }
 
 function graphHTML() {
-  return tabsHTML('graph') + `<div class="cy-wrap"><div id="cy"></div><div class="cy-tip" id="cyTip"></div></div>
-    <div class="graph-hint">虛線 = 相關(概念比對自動生成)、實線箭頭 = 先修(prereq,手動標註)。點課程節點展開/收合單元;點單元進講義;滑過連線看概念呼應。<span class="info-wrap" tabindex="0"><span class="info-icon">i</span><span class="info-pop">
+  return tabsHTML('graph') + `<div class="sc-ctrl" id="gCtrl" style="margin-bottom:12px;display:none">
+      <label for="gThr">MaxSim 相似度門檻</label>
+      <input type="range" id="gThr" min="0" max="1" step="0.0001">
+      <span class="val" id="gThrV">—</span>
+      <span id="gThrN" style="font-size:12.5px;color:var(--muted)"></span>
+      <button type="button" class="hintbtn" id="gThrReset">回到預設</button>
+    </div>
+    <div class="cy-wrap"><div id="cy"></div>
+      <div class="cy-tools">
+        <button type="button" id="cyFit" title="把整張圖縮回畫面內">回到全圖</button>
+        <button type="button" id="cyRelayout" title="重新計算節點位置">重排版面</button>
+      </div>
+      <div class="cy-tip" id="cyTip"></div></div>
+    <div class="graph-hint">虛線 = 相關(概念比對自動生成)、實線箭頭 = 先修(prereq,手動標註)。點課程節點展開/收合單元;點單元進講義;滑過節點看重點、滑過連線看概念呼應。<span class="info-wrap" tabindex="0"><span class="info-icon">i</span><span class="info-pop">
       <b>關聯怎麼算出來的(Information Extraction 流程)</b>
       <ol>
         <li><b>概念萃取(生成期)</b>:開課時 LLM 從課綱 AGENDA 萃取 8-12 個概念(裸名詞 + 一句定義,禁教學模板詞),存進該課 meta.json 的 concepts。</li>
         <li><b>向量化</b>:本機 Ollama(bge-m3)把每個概念變成 1024 維向量,依內容 hash 快取,沒改過的概念零計算。</li>
         <li><b>Centering</b>:減去全部概念的平均向量,消除「同為技術名詞」的共同基線,只留各自的主題訊號。</li>
         <li><b>MaxSim 比對</b>:A 課的每個概念到 B 課找最相似的概念取分,雙向平均 = 兩課相似度(ColBERT late interaction)。</li>
-        <li><b>空隙偵測</b>:所有課程配對按分數排序,在最大相鄰落差處切線,落差之上成為圖上的邊。</li>
+        <li><b>門檻切線</b>:所有課程配對按分數排序,上方滑桿決定分數多少以上要畫成邊。預設值取自「空隙偵測」——在最大相鄰落差處切線;拉動滑桿即可自行調整,只影響顯示,不寫回任何檔案。</li>
         <li><b>概念呼應</b>:每條邊附上分數最高的概念配對當證據,就是 tooltip 裡看到的內容。</li>
       </ol>
       <span class="dim">執行:node pipeline/relations.js(純本機、零 LLM);萃取規格見 pipeline/prompts/concepts.md。</span>
@@ -288,15 +346,60 @@ function initGraph() {
   const panel = getComputedStyle(document.documentElement).getPropertyValue('--panel').trim();
 
   const elements = [];
-  for (const c of COURSES) {
+  // 預先排成一個圓當 layout 起點:確定性(每次開一樣)且起始就不重疊
+  COURSES.forEach((c, i) => {
+    const t = -Math.PI / 2 + (i * 2 * Math.PI) / COURSES.length;
     elements.push({ data: { id: c.slug, label: `${c.title}\n${c.done}/${c.total}`, kind: 'course',
-      size: 50 + c.total * 3, pct: c.total ? c.done / c.total : 0 } });
-  }
-  for (const e of (GRAPH.edges || [])) {
+      size: 50 + c.total * 3, pct: c.total ? c.done / c.total : 0 },
+      position: { x: 320 * Math.cos(t), y: 320 * Math.sin(t) } });
+  });
+  // 手動邊:權威宣告,不受門檻影響
+  const manualEdges = (GRAPH.edges || []).filter(e => (e.origin || 'manual') === 'manual');
+  const manualKeys = new Set(manualEdges.map(e => [e.source, e.target].sort().join('|')));
+  for (const e of manualEdges) {
     elements.push({ data: { id: `${e.source}->${e.target}`, source: e.source, target: e.target,
-      type: e.type || 'related', why: e.why || '', kind: 'rel',
-      origin: e.origin || 'manual', score: e.score || 0,
+      type: e.type || 'related', why: e.why || '', kind: 'rel', origin: 'manual', score: e.score || 0,
       evidence: (e.evidence || []).map(v => `${v.from} ↔ ${v.to}`).join('、') } });
+  }
+  // 自動邊:MaxSim 全部 15 組配對,由門檻即時決定畫哪幾條(同配對已有手動邊者略過)
+  const MS = GRAPH.scorers && GRAPH.scorers.maxsim;
+  const autoPool = MS ? MS.pairs.filter(p => !manualKeys.has([p.a, p.b].sort().join('|'))) : [];
+  const autoEl = p => ({ data: { id: `auto:${p.a}|${p.b}`, source: p.a, target: p.b,
+    type: 'related', why: p.why || '', kind: 'rel', origin: 'auto', score: p.score,
+    evidence: (p.evidence || []).map(v => v.label).join('、') } });
+  // 預設留 n−1 條(n = 課程數):平均每門課配到一條邊,通常剛好讓沒有課被孤立在圖外。
+  // 這是啟發式不是保證——前 n−1 名有可能全擠在少數幾門課之間,那還是會有孤立節點。
+  const wantAuto = Math.max(1, COURSES.length - 1 - manualEdges.length);
+  const defThr = (MS && autoPool.length)
+    ? autoPool[Math.min(wantAuto, autoPool.length) - 1].score : 0;
+  const gapThr = (MS && MS.pairs.length)
+    ? MS.pairs[Math.min(MS.gapCut, MS.pairs.length) - 1].score : 0;
+  let thr = defThr;
+
+  // layout 參數:節點斥力調大、標題長度已由 text-max-width 限制,避免節點與文字互相疊加
+  function COSE(animate) {
+    return {
+      name: 'cose', animate, animationDuration: 400, padding: 60,
+      randomize: false,              // 沿用上面預排的圓形起點,每次開版面一致
+      nodeRepulsion: () => 30000,    // 預設 2048 對 50~90px 的節點太小,會擠在一起
+      nodeOverlap: 28,
+      idealEdgeLength: e => (e.data('kind') === 'unitlink' ? 80 : 240),
+      edgeElasticity: () => 60,
+      gravity: 0.35,
+      componentSpacing: 160,         // 沒連在一起的群之間拉開,不要疊成一團
+      numIter: 2500,
+      coolingFactor: 0.97,
+    };
+  }
+  if (MS) {
+    for (const p of autoPool) if (p.score >= thr) elements.push(autoEl(p));
+  } else {
+    // 沒有 scorers 資料(舊的 graph-auto.json)就退回原本的固定邊
+    for (const e of (GRAPH.edges || []).filter(e => e.origin === 'auto')) {
+      elements.push({ data: { id: `${e.source}->${e.target}`, source: e.source, target: e.target,
+        type: 'related', why: e.why || '', kind: 'rel', origin: 'auto', score: e.score || 0,
+        evidence: (e.evidence || []).map(v => `${v.from} ↔ ${v.to}`).join('、') } });
+    }
   }
 
   cy = cytoscape({
@@ -304,6 +407,7 @@ function initGraph() {
     style: [
       { selector: 'node[kind="course"]', style: {
         'label': 'data(label)', 'text-wrap': 'wrap', 'text-valign': 'center', 'color': text,
+        'text-max-width': 'data(size)',   // 沒有這行,中文長標題會拉成一長條壓到隔壁節點
         'font-size': 12, 'font-weight': 600,
         'width': 'data(size)', 'height': 'data(size)',
         'background-color': panel, 'border-width': 4, 'border-color': accent,
@@ -313,9 +417,11 @@ function initGraph() {
         'pie-1-background-opacity': 0.25,
       }},
       { selector: 'node[kind="unit"]', style: {
-        'label': 'data(label)', 'text-wrap': 'wrap', 'text-max-width': 140, 'font-size': 10,
-        'color': text, 'text-valign': 'bottom', 'text-margin-y': 4, 'text-opacity': .8,
-        'width': 16, 'height': 16, 'background-color': 'data(color)',
+        'label': 'data(label)', 'text-wrap': 'wrap', 'text-max-width': 120, 'font-size': 10,
+        'color': text, 'text-valign': 'bottom', 'text-margin-y': 5, 'text-opacity': .8,
+        // 16px 在觸控上幾乎點不到;22px + padding 讓可點區域接近 30px
+        'width': 22, 'height': 22, 'background-color': 'data(color)',
+        'border-width': 2, 'border-color': panel,
       }},
       { selector: 'edge[kind="rel"]', style: {
         'width': 2, 'line-color': '#4fb3bf', 'line-style': 'dashed', 'curve-style': 'bezier', 'opacity': .8,
@@ -324,46 +430,155 @@ function initGraph() {
         'line-style': 'solid', 'line-color': accent, 'target-arrow-shape': 'triangle', 'target-arrow-color': accent,
       }},
       { selector: 'edge[kind="unitlink"]', style: { 'width': 1, 'line-color': 'rgba(127,127,127,.35)', 'curve-style': 'bezier' } },
+      // 展開中的課程:換成虛線邊框,一眼看出哪幾門是被自己點開的
+      { selector: 'node.expanded', style: { 'border-style': 'dashed', 'border-width': 5 } },
+      // hover 聚焦:滑到誰身上就把無關的節點/邊壓暗,關聯才讀得出來
+      { selector: '.hovered', style: { 'border-width': 7, 'z-index': 30 } },
+      { selector: 'edge.hovered', style: { 'width': 4, 'opacity': 1 } },
+      { selector: '.faded', style: { 'opacity': .2, 'text-opacity': .15 } },
     ],
-    layout: { name: 'cose', animate: false, padding: 60 },
+    layout: COSE(false),
     wheelSensitivity: 0.2,
   });
 
+  // ---- 相似度門檻:即時決定畫哪幾條自動邊,不重跑 layout(節點不會亂跳)----
+  if (MS) {
+    const sl = document.getElementById('gThr');
+    const sv = document.getElementById('gThrV');
+    const sn = document.getElementById('gThrN');
+    const scores = MS.pairs.map(p => p.score);
+    document.getElementById('gCtrl').style.display = '';
+    // 分數在 relations.js 存到小數 4 位,滑桿精度必須對齊,否則預設值會被吸附到隔壁刻度而濾掉該留的邊
+    sl.step = '0.0001';
+    sl.min = (Math.floor(Math.min(...scores) * 1e4) / 1e4).toFixed(4);
+    sl.max = (Math.ceil(Math.max(...scores) * 1e4) / 1e4).toFixed(4);
+    const EPS = 1e-9; // 滑桿吸附後可能有浮點誤差,比較時留一點餘裕
+    const apply = () => {
+      const keep = autoPool.filter(p => p.score >= thr - EPS);
+      cy.remove('edge[origin="auto"]');
+      cy.add(keep.map(autoEl));
+      sv.textContent = thr.toFixed(4);
+      sn.textContent = `${keep.length} 條自動邊`
+        + (manualEdges.length ? ` ＋ ${manualEdges.length} 條手動邊` : '')
+        + `　(候選 ${autoPool.length} 組;預設 n−1 = ${defThr.toFixed(4)};空隙偵測 = ${gapThr.toFixed(4)})`;
+    };
+    sl.value = String(thr);
+    apply();
+    sl.addEventListener('input', () => { thr = +sl.value; apply(); });
+    document.getElementById('gThrReset').addEventListener('click', () => {
+      thr = defThr; sl.value = String(thr); apply();
+    });
+  }
+
+  document.getElementById('cyFit').addEventListener('click', () => cy.animate({ fit: { padding: 50 } }, { duration: 300 }));
+  document.getElementById('cyRelayout').addEventListener('click', () => cy.layout(COSE(true)).run());
+
+  // 展開/收合單元。
+  // 舊做法是 add 完就 cy.layout(COSE).run(),整張圖每個節點都會重新彈一次位置——
+  // 使用者只是想看某一門課的單元,卻要重新找其他課跑去哪了,這是互動最卡的地方。
+  // 改成:把單元以扇形釘在該課節點旁邊(方向朝遠離圖心的外側,才不會蓋到別門課),
+  // 其餘節點一律不動。想重排隨時按「重排版面」。
   const expanded = new Set();
+  function fanPositions(node, n) {
+    const cn = cy.nodes('[kind="course"]');
+    let cx = 0, cy0 = 0;
+    cn.forEach(x => { cx += x.position('x'); cy0 += x.position('y'); });
+    cx /= cn.length || 1; cy0 /= cn.length || 1;
+    const p = node.position();
+    const dx = p.x - cx, dy = p.y - cy0;
+    // 節點剛好落在圖心(只有一門課)時 atan2 給 0,改成朝正下方展開
+    const base = (dx || dy) ? Math.atan2(dy, dx) : Math.PI / 2;
+    const r0 = node.width() / 2 + 85;
+    const spread = Math.min(Math.PI * 1.55, Math.max(0.8, n * 0.32));
+    return Array.from({ length: n }, (_, i) => {
+      const t = n === 1 ? base : base - spread / 2 + (spread * i) / (n - 1);
+      const r = r0 + (i % 2) * 52;   // 交錯兩圈,標題才不會左右黏在一起
+      return { x: p.x + r * Math.cos(t), y: p.y + r * Math.sin(t) };
+    });
+  }
   cy.on('tap', 'node[kind="course"]', (ev) => {
-    const id = ev.target.id();
+    const node = ev.target, id = node.id();
+    hideTip();
     if (expanded.has(id)) {
-      cy.remove(cy.elements(`[parentCourse="${id}"]`));
+      // 收回課程節點再移除,不要整批瞬間消失
+      const gone = cy.elements(`[parentCourse="${id}"]`);
+      const p = node.position();
+      gone.nodes().animate({ position: { x: p.x, y: p.y } }, { duration: 180 });
+      setTimeout(() => cy.remove(gone), 190);
+      node.removeClass('expanded');
       expanded.delete(id);
       return;
     }
     const c = COURSES.find(x => x.slug === id);
+    if (!c || !c.units.length) return;
+    const p = node.position();
+    const targets = fanPositions(node, c.units.length);
     const eles = [];
-    c.units.forEach((u) => {
+    c.units.forEach((u, i) => {
       const uid = `${id}::${u.file}`;
       eles.push({ data: { id: uid, label: u.title.replace(/^Unit \d+[::]\s*/, '').replace(/ ——.*$/, ''),
-        kind: 'unit', color: STATE_COLOR[u.state] || STATE_COLOR.unread,
-        parentCourse: id, course: id, file: u.file } });
+        kind: 'unit', color: STATE_COLOR[u.state] || STATE_COLOR.unread, state: u.state,
+        title: u.title, parentCourse: id, course: id, file: u.file,
+        tx: targets[i].x, ty: targets[i].y },
+        position: { x: p.x, y: p.y } });   // 從課程節點中心長出來
       eles.push({ data: { id: `${uid}-e`, source: id, target: uid, kind: 'unitlink', parentCourse: id } });
     });
-    cy.add(eles);
-    cy.layout({ name: 'cose', animate: true, animationDuration: 400, padding: 60, randomize: false }).run();
+    cy.add(eles).nodes().forEach(n =>
+      n.animate({ position: { x: n.data('tx'), y: n.data('ty') } }, { duration: 260, easing: 'ease-out-cubic' }));
+    node.addClass('expanded');
     expanded.add(id);
   });
   cy.on('tap', 'node[kind="unit"]', (ev) => {
     const d = ev.target.data();
+    hideTip();
     window.open(readerUrl(d.course, d.file), '_blank', 'noopener');
   });
-  // 關聯線 tooltip:hover 顯示(觸控裝置用 tap 切換)
+
+  // 游標:cytoscape 畫在 canvas 上,不會自動變手指,不給回饋就看不出節點可以點
+  cy.on('mouseover', 'node', () => { container.style.cursor = 'pointer'; });
+  cy.on('mouseover', 'edge[kind="rel"]', () => { container.style.cursor = 'help'; });
+  cy.on('mouseout', 'node, edge', () => { container.style.cursor = ''; });
+  // hover 聚焦:只留下這個節點與它的直接鄰居
+  cy.on('mouseover', 'node', (ev) => {
+    if (ev.target.grabbed()) return;
+    const keep = ev.target.closedNeighborhood();
+    cy.elements().difference(keep).addClass('faded');
+    ev.target.addClass('hovered');
+  });
+  cy.on('mouseover', 'edge[kind="rel"]', (ev) => {
+    const keep = ev.target.connectedNodes().union(ev.target);
+    cy.elements().difference(keep).addClass('faded');
+    ev.target.addClass('hovered');
+  });
+  const unfocus = () => cy.elements().removeClass('faded hovered');
+  cy.on('mouseout', 'node, edge', unfocus);
+  cy.on('grab', unfocus);
+  // tooltip:節點與關聯線都給(觸控裝置用 tap 切換)
   const tip = document.getElementById('cyTip');
   const TYPE_LABEL = { prereq: '先修', related: '相關', extends: '深入' };
-  function showTip(ev) {
-    const d = ev.target.data();
+  function tipHTML(ele) {
+    const d = ele.data();
+    if (d.kind === 'course') {
+      const c = COURSES.find(x => x.slug === d.id) || {};
+      const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
+      return `<b>${esc(c.title || d.id)}</b>
+        <span class="dim">(${c.done || 0}/${c.total || 0} 已讀 · ${pct}%)</span>
+        <div class="why">點一下${expanded.has(d.id) ? '收合' : '展開'}單元</div>`;
+    }
+    if (d.kind === 'unit') {
+      return `<b>${esc(d.title || d.label)}</b>
+        <span class="dim">(${LABEL[d.state] || d.state || ''})</span>
+        <div class="why">點一下開講義</div>`;
+    }
     const badge = (TYPE_LABEL[d.type] || esc(d.type)) + (d.score ? ` · 相似度 ${Number(d.score).toFixed(3)}` : '');
-    tip.innerHTML = `<b>${esc(courseTitle(d.source))} ${d.type === 'prereq' ? '→' : '↔'} ${esc(courseTitle(d.target))}</b>
+    return `<b>${esc(courseTitle(d.source))} ${d.type === 'prereq' ? '→' : '↔'} ${esc(courseTitle(d.target))}</b>
       <span class="dim">(${badge})</span>
       ${d.why ? `<div class="why">${esc(d.why)}</div>` : ''}`;
-    const pos = ev.renderedPosition || (ev.target.midpoint && { x: ev.target.renderedMidpoint().x, y: ev.target.renderedMidpoint().y });
+  }
+  function showTip(ev) {
+    tip.innerHTML = tipHTML(ev.target);
+    let pos = ev.renderedPosition;                     // 邊沒有 renderedPosition,退回中點
+    if (!pos) { try { pos = ev.target.renderedMidpoint(); } catch (_) { pos = null; } }
     const wrap = container.getBoundingClientRect();
     let x = (pos ? pos.x : wrap.width / 2) + 14;
     let y = (pos ? pos.y : wrap.height / 2) + 14;
@@ -375,24 +590,162 @@ function initGraph() {
     tip.style.top = y + 'px';
   }
   const hideTip = () => tip.classList.remove('show');
-  cy.on('mouseover', 'edge[kind="rel"]', showTip);
-  cy.on('mousemove', 'edge[kind="rel"]', showTip);
-  cy.on('mouseout', 'edge[kind="rel"]', hideTip);
+  cy.on('mouseover mousemove', 'edge[kind="rel"], node', showTip);
+  cy.on('mouseout', 'edge[kind="rel"], node', hideTip);
   cy.on('tap', 'edge[kind="rel"]', (ev) => tip.classList.contains('show') ? hideTip() : showTip(ev));
   cy.on('tap', (ev) => { if (ev.target === cy) hideTip(); }); // 點空白處關掉
-  cy.on('pan zoom', hideTip);
+  cy.on('pan zoom drag', hideTip);
+}
+
+// ---------- 計分方式比較(#/scoring)----------
+const SC_PALETTE = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#a78bfa'];
+let cy2 = null;
+
+function scoringHTML() {
+  return tabsHTML('scoring') + `<div id="scWrap"></div>`;
+}
+
+// 用聯集尋找算連通分量 = 這個計分方式切出來的分群
+function scComponents(slugs, edges) {
+  const p = Object.fromEntries(slugs.map(s => [s, s]));
+  const find = x => (p[x] === x ? x : (p[x] = find(p[x])));
+  for (const e of edges) { const ra = find(e.a), rb = find(e.b); if (ra !== rb) p[ra] = rb; }
+  const g = {};
+  for (const s of slugs) (g[find(s)] ??= []).push(s);
+  return Object.values(g).sort((a, b) => b.length - a.length || a[0].localeCompare(b[0]));
+}
+
+function initScoring() {
+  const wrap = document.getElementById('scWrap');
+  if (!wrap) return;
+  const SC = GRAPH.scorers;
+  if (!SC || !Object.keys(SC).length) {
+    wrap.innerHTML = `<div class="error">還沒有計分比較資料。在專案根目錄跑一次
+      <b>node pipeline/relations.js</b>(需要本機 Ollama)產生 app/data/graph-auto.json 後重新整理。</div>`;
+    return;
+  }
+  const ids = Object.keys(SC);
+  const titleOf = s => (COURSES.find(c => c.slug === s) || {}).title || s;
+  const slugs = COURSES.map(c => c.slug);
+  let curId = GRAPH.defaultScorer && SC[GRAPH.defaultScorer] ? GRAPH.defaultScorer : ids[0];
+  let topN = SC[curId].gapCut;
+
+  wrap.innerHTML = `
+    <div class="sc-ctrl">
+      <label for="scPick">計分方式</label>
+      <select id="scPick">${ids.map(i => `<option value="${i}">${esc(SC[i].label)}</option>`).join('')}</select>
+      <label for="scTopN">保留前</label>
+      <input type="range" id="scTopN" min="0" max="1" step="1">
+      <span class="val" id="scTopNv">—</span>
+      <button type="button" class="hintbtn" id="scGap">回到空隙建議</button>
+    </div>
+    <p class="sc-note" id="scNote"></p>
+    <div class="sc-groups" id="scGroups"></div>
+    <div id="cy2"></div>
+    <p class="sc-note">節點顏色 = 分群。實心連線 = 這個計分方式在目前門檻下留下的邊。
+      灰色虛線 = 手動宣告的權威邊(<b>不受計分方式影響</b>,只作對照)。</p>
+    <div style="overflow-x:auto"><table class="sc-tbl" id="scTbl"></table></div>
+    <p class="sc-note">此頁只是<b>檢視工具</b>:切換計分方式不會寫入任何檔案,圖譜頁與 API 的預設邊維持不變。</p>`;
+
+  const sel = document.getElementById('scPick');
+  const sl = document.getElementById('scTopN');
+  const slv = document.getElementById('scTopNv');
+  sel.value = curId;
+  sl.max = String(SC[curId].pairs.length);
+
+  // 節點位置固定成一個圓,換門檻時不重跑 layout,節點就不會亂跳
+  const pos = {};
+  slugs.forEach((s, i) => {
+    const t = -Math.PI / 2 + (i * 2 * Math.PI) / slugs.length;
+    pos[s] = { x: 220 * Math.cos(t), y: 220 * Math.sin(t) };
+  });
+  const manualPairs = (GRAPH.edges || []).filter(e => e.origin === 'manual')
+    .map(e => [e.source, e.target].sort().join('|'));
+
+  function draw() {
+    const S = SC[curId];
+    const kept = S.pairs.slice(0, topN);
+    const comps = scComponents(slugs, kept);
+    const colorOf = {};
+    comps.forEach((g, i) => { const c = g.length > 1 ? SC_PALETTE[i % SC_PALETTE.length] : null; g.forEach(s => { colorOf[s] = c; }); });
+
+    slv.textContent = topN + ' 條';
+    document.getElementById('scNote').innerHTML =
+      `${esc(S.note)} <b>空隙偵測建議切在前 ${S.gapCut} 名</b>(最大相鄰落差 ${S.gapSize})。`;
+
+    const multi = comps.filter(g => g.length > 1);
+    const solo = comps.filter(g => g.length === 1).flat();   // 攤平成 slug 陣列,否則 titleOf 拿到的是陣列
+    document.getElementById('scGroups').innerHTML =
+      multi.map((g, i) => `<div class="sc-group"><div class="gh"><span class="dot"
+        style="background:${SC_PALETTE[i % SC_PALETTE.length]}"></span>群 ${i + 1}(${g.length} 門)</div>
+        <div class="gm">${g.map(s => esc(titleOf(s))).join('<br>')}</div></div>`).join('')
+      + (solo.length ? `<div class="sc-group solo"><div class="gh">未連上(${solo.length} 門)</div>
+        <div class="gm">${solo.map(s => esc(titleOf(s))).join('<br>')}</div></div>` : '');
+
+    // ---- 圖 ----
+    const els = slugs.map(s => ({ data: { id: s, label: titleOf(s), col: colorOf[s] || 'rgba(127,127,127,.45)' }, position: pos[s] }));
+    for (const p of kept) els.push({ data: { id: `k:${p.a}|${p.b}`, source: p.a, target: p.b, kind: 'kept' } });
+    for (const mp of manualPairs) {
+      const [a, b] = mp.split('|');
+      if (slugs.includes(a) && slugs.includes(b)) els.push({ data: { id: `m:${mp}`, source: a, target: b, kind: 'man' } });
+    }
+    const text = getComputedStyle(document.documentElement).getPropertyValue('--text').trim();
+    const panel = getComputedStyle(document.documentElement).getPropertyValue('--panel').trim();
+    if (cy2) cy2.destroy();
+    cy2 = cytoscape({
+      container: document.getElementById('cy2'), elements: els,
+      style: [
+        { selector: 'node', style: { label: 'data(label)', 'text-valign': 'center', color: text,
+          'font-size': 11, 'font-weight': 650, 'text-wrap': 'wrap', 'text-max-width': 72,
+          width: 78, height: 78, 'background-color': panel, 'border-width': 4, 'border-color': 'data(col)' } },
+        { selector: 'edge[kind="kept"]', style: { width: 3, 'line-color': '#4fb3bf', 'curve-style': 'bezier', opacity: .9 } },
+        { selector: 'edge[kind="man"]', style: { width: 2, 'line-color': 'rgba(127,127,127,.5)',
+          'line-style': 'dashed', 'curve-style': 'bezier' } },
+      ],
+      layout: { name: 'preset' }, userZoomingEnabled: false, userPanningEnabled: false, autoungrabify: true,
+    });
+    cy2.fit(undefined, 46);
+
+    // ---- 表 ----
+    const rows = S.pairs.map((p, i) => `
+      <tr class="${i < topN ? 'kept' : ''}">
+        <td class="n">#${i + 1}</td>
+        <td class="n">${p.score}</td>
+        <td>${esc(titleOf(p.a))} ↔ ${esc(titleOf(p.b))}${p.manual ? '<span class="mflag">已有手動邊</span>' : ''}</td>
+        <td class="ev">${esc(p.why)}</td>
+      </tr>${i === topN - 1 && topN < S.pairs.length ? '<tr class="cutline"><td colspan="4"></td></tr>' : ''}`).join('');
+    document.getElementById('scTbl').innerHTML =
+      `<thead><tr><th>名次</th><th>分數</th><th>課程配對</th><th>證據</th></tr></thead><tbody>${rows}</tbody>`;
+  }
+
+  sel.addEventListener('change', () => {
+    curId = sel.value;
+    sl.max = String(SC[curId].pairs.length);
+    topN = SC[curId].gapCut;          // 換方法就回到該方法自己的空隙建議
+    sl.value = String(topN);
+    draw();
+  });
+  sl.addEventListener('input', () => { topN = +sl.value; draw(); });
+  document.getElementById('scGap').addEventListener('click', () => {
+    topN = SC[curId].gapCut; sl.value = String(topN); draw();
+  });
+  sl.value = String(topN);
+  draw();
 }
 
 // ---------- render / events ----------
 function render() {
   const r = route();
   cy = null; // 換頁就丟掉舊實例
-  document.getElementById('main').classList.toggle('wide', r.page === 'graph');
+  if (cy2) { cy2.destroy(); cy2 = null; }
+  document.getElementById('main').classList.toggle('wide', r.page === 'graph' || r.page === 'scoring');
   document.getElementById('view').innerHTML =
     r.page === 'detail' ? detailHTML(r.slug)
     : r.page === 'graph' ? graphHTML()
+    : r.page === 'scoring' ? scoringHTML()
     : overviewHTML();
   if (r.page === 'graph') initGraph();
+  if (r.page === 'scoring') initScoring();
   const totalUnits = COURSES.reduce((n, c) => n + c.total, 0);
   document.getElementById('foot').textContent =
     COURSES.length ? `${COURSES.length} courses · ${totalUnits} units` : '';
