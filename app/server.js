@@ -1,14 +1,17 @@
 // learning hub — 講義閱讀 + 學習狀態(SQLite)+ 講義側欄 AI 助教(claude CLI headless)
-// 零依賴 Node。courses/ 唯讀;唯一可寫處是 app/data/。
+// 零依賴 Node。courses/ 一般唯讀；course-lifecycle 是唯一可原子改 meta.status 的受控例外。
 'use strict';
 
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 const { URL } = require('node:url');
 
 const store = require('./lib/db');
 const content = require('./lib/content');
+const lifecycle = require('./lib/course-lifecycle');
+const archiveSearch = require('./lib/archive-search');
 const chat = require('./lib/chat');
 const agents = require('./lib/agents');
 
@@ -58,8 +61,8 @@ function progressMap(course) {
   return map;
 }
 
-function coursesWithProgress() {
-  return content.listCourses().map(({ slug, meta, units }) => {
+function coursesWithProgress(status = 'active') {
+  return content.listCourses({ status }).map(({ slug, meta, units, status: courseStatus }) => {
     const pm = progressMap(slug);
     const u = units.map(x => ({
       ...x,
@@ -69,7 +72,8 @@ function coursesWithProgress() {
     return {
       slug,
       title: meta.title || slug,
-      status: meta.status || 'active',
+      status: courseStatus,
+      archivedAt: meta.archivedAt || null,
       tags: meta.tags || [],
       relations: meta.relations || [],
       units: u,
@@ -77,6 +81,41 @@ function coursesWithProgress() {
       total: u.length,
     };
   });
+}
+
+function activeCourseSlugs() {
+  return new Set(content.listCourses({ status: 'active' }).map(c => c.slug));
+}
+
+// 關聯圖是可重建衍生資料。封存／還原成功後盡力重跑，不讓 Ollama 不可用阻擋 lifecycle。
+let relationsRunning = false;
+let relationsQueued = false;
+function scheduleRelations() {
+  if (relationsRunning) { relationsQueued = true; return; }
+  relationsRunning = true;
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'pipeline', 'relations.js')], {
+    cwd: path.join(__dirname, '..'), env: process.env, stdio: 'ignore',
+  });
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    relationsRunning = false;
+    if (relationsQueued) { relationsQueued = false; scheduleRelations(); }
+  };
+  child.once('error', finish); // spawn 失敗時未必會有 close
+  child.once('close', finish);
+}
+
+function routeCourseLifecycle(req, res, url) {
+  const m = url.pathname.match(/^\/api\/courses\/([^/]+)\/(archive|restore)$/);
+  if (!m || req.method !== 'POST') return false;
+  let slug;
+  try { slug = decodeURIComponent(m[1]); } catch { throw Object.assign(new Error('bad course slug'), { status: 400 }); }
+  const out = m[2] === 'archive' ? lifecycle.archive(slug) : lifecycle.restore(slug);
+  scheduleRelations();
+  json(res, 200, { ok: true, course: out });
+  return true;
 }
 
 // ---------- AI 助教 prompt 組裝 ----------
@@ -118,12 +157,25 @@ function gradePrompt(courseSlug, unitRaw, q, answer) {
 async function handleApi(req, res, url) {
   const q = url.searchParams;
 
+  if (routeCourseLifecycle(req, res, url)) return;
+
   if (req.method === 'GET' && url.pathname === '/api/courses') {
-    return json(res, 200, coursesWithProgress());
+    return json(res, 200, coursesWithProgress('active'));
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/archive') {
+    return json(res, 200, coursesWithProgress('archived'));
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/archive/search') {
+    const query = q.get('q') || '';
+    if (query.length > 160) return json(res, 400, { error: 'query too long' });
+    const archived = content.listCourses({ status: 'archived' });
+    return json(res, 200, archiveSearch.search(archived, query));
   }
 
   if (req.method === 'GET' && url.pathname === '/api/graph') {
-    const courses = coursesWithProgress();
+    const courses = coursesWithProgress('active');
     const known = new Set(courses.map(c => c.slug));
     const nodes = courses.map(c => ({
       id: c.slug, title: c.title, status: c.status, done: c.done, total: c.total,
@@ -161,13 +213,15 @@ async function handleApi(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/unit') {
     const course = q.get('course'), unit = q.get('unit');
+    const { meta, status: courseStatus } = content.courseInfo(course);
     const { md, questions } = content.readUnit(course, unit);
-    const meta = content.readMeta(course) || {};
     const units = content.listUnits(course);
     const pm = progressMap(course);
     return json(res, 200, {
       course, unit, md,
       courseTitle: meta.title || course,
+      courseStatus,
+      archivedAt: meta.archivedAt || null,
       questions: questions.map(({ id, question }) => ({ id, question })), // keywords 不外流
       units: units.map(u => ({ ...u, state: pm[u.file] ? pm[u.file].state : 'unread' })),
       state: pm[unit] ? pm[unit].state : 'unread',
@@ -177,6 +231,7 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/progress') {
     const { course, unit, state } = await readBody(req);
     if (!STATES.has(state)) return json(res, 400, { error: 'bad state' });
+    lifecycle.requireActive(course);
     content.readUnit(course, unit); // 驗證存在 + 路徑安全
     store.setProgress(course, unit, state);
     store.addRecord(course, unit, 'read', `state → ${state}`);
@@ -184,22 +239,28 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/records') {
-    return json(res, 200, store.recentRecords(Number(q.get('limit') || 20)));
+    const active = activeCourseSlugs();
+    return json(res, 200, store.recentRecords(Number(q.get('limit') || 20)).filter(r => active.has(r.course)));
   }
 
   if (req.method === 'POST' && url.pathname === '/api/records') {
     const { course, unit, kind, note } = await readBody(req);
     if (!course || !kind) return json(res, 400, { error: 'course/kind required' });
+    lifecycle.requireActive(course);
     store.addRecord(course, unit || null, kind, note);
     return json(res, 200, { ok: true });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/redo') {
-    return json(res, 200, store.redoQueue());
+    const active = activeCourseSlugs();
+    return json(res, 200, store.redoQueue().filter(r => active.has(r.course)));
   }
 
   if (req.method === 'GET' && url.pathname === '/api/selfcheck') {
-    return json(res, 200, store.attempts(q.get('course'), q.get('unit')));
+    const course = q.get('course'), unit = q.get('unit');
+    content.courseInfo(course);
+    content.readUnit(course, unit); // 封存課可查看既有作答，但不能再送出
+    return json(res, 200, store.attempts(course, unit));
   }
 
   if (req.method === 'POST' && url.pathname === '/api/selfcheck') {
@@ -208,27 +269,34 @@ async function handleApi(req, res, url) {
     const { raw, questions } = content.readUnit(course, unit);
     const question = questions.find(x => x.id === qid);
     if (!question) return json(res, 404, { error: 'question not found' });
+    const release = lifecycle.beginActiveOperation(course);
 
-    const out = await chat.oneShot(gradePrompt(course, raw, question, answer));
-    let graded;
     try {
-      graded = chat.extractJson(out);
-    } catch {
-      graded = { verdict: 'redo', missing: [], feedback: '批改輸出解析失敗,請重試。原始輸出:' + out.slice(0, 300) };
+      const out = await chat.oneShot(gradePrompt(course, raw, question, answer));
+      let graded;
+      try {
+        graded = chat.extractJson(out);
+      } catch {
+        graded = { verdict: 'redo', missing: [], feedback: '批改輸出解析失敗,請重試。原始輸出:' + out.slice(0, 300) };
+      }
+      const verdict = graded.verdict === 'pass' ? 'pass' : 'redo';
+      store.addAttempt(course, unit, qid, answer, verdict, graded.feedback || '');
+      store.addRecord(course, unit, 'selfcheck', `${qid}: ${verdict}`);
+      return json(res, 200, {
+        verdict,
+        missing: graded.missing || [],
+        feedback: graded.feedback || '',
+        keywords: question.keywords, // 批改後才展示
+      });
+    } finally {
+      release();
     }
-    const verdict = graded.verdict === 'pass' ? 'pass' : 'redo';
-    store.addAttempt(course, unit, qid, answer, verdict, graded.feedback || '');
-    store.addRecord(course, unit, 'selfcheck', `${qid}: ${verdict}`);
-    return json(res, 200, {
-      verdict,
-      missing: graded.missing || [],
-      feedback: graded.feedback || '',
-      keywords: question.keywords, // 批改後才展示
-    });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/chat/history') {
     const course = q.get('course'), unit = q.get('unit');
+    content.courseInfo(course);
+    content.readUnit(course, unit); // 驗證 course / unit，封存課仍允許讀既有歷史
     // 只有 session 沒訊息的情況(對話失敗後留下的空殼)不列出來
     const sessions = store.chatSessions(course, unit).filter(s => s.n > 0);
     // 沒指定就給最新那段(維持原本行為);指定了就給那段
@@ -251,6 +319,7 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/chat') {
     const { course, unit, message, newSession, agent, model, session } = await readBody(req);
     if (!message || !message.trim()) return json(res, 400, { error: 'empty message' });
+    lifecycle.requireActive(course);
     const { raw } = content.readUnit(course, unit);
 
     // session 有給就續那一段(前端的歷史下拉),沒給就續最新那段
@@ -258,6 +327,7 @@ async function handleApi(req, res, url) {
       : (session ? store.chatSession(course, unit, session) : store.latestChatSession(course, unit));
     const def = agents.resolve(agent || (prev ? prev.agent : agents.DEFAULT_AGENT));
     if (!def) return json(res, 503, { error: '本機找不到任何可用的 agent CLI' });
+    const release = lifecycle.beginActiveOperation(course);
     // session 不能跨 agent 續聊(claude 與 pi 的 session 格式與 id 空間都不同),
     // 所以換 agent 等於開新對話 —— 這裡把 prev 丟掉,systemPrompt 才會重新帶上。
     if (prev && prev.agent !== def.id) prev = null;
@@ -293,6 +363,8 @@ async function handleApi(req, res, url) {
       send('done', { sessionId, text, agent: def.id, model: used || null, resumeLost: !!resumeLost });
     } catch (e) {
       send('error', { error: String(e.message || e) });
+    } finally {
+      release();
     }
     return res.end();
   }

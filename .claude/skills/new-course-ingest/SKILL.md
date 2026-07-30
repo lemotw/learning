@@ -24,7 +24,7 @@ description: 在本專案建立一門個人化課程(診斷 → 程度分析+課
 
 ## 原則
 
-- `courses/` 對 app 是唯讀;學習狀態都在 `app/data/learning.db`,不要往課程目錄寫狀態。
+- `courses/` 對一般 app 流程是唯讀;學習狀態都在 `app/data/learning.db`,不要往課程目錄寫狀態。唯一例外是 course lifecycle 的封存／還原會原子更新 `meta.json.status`（`active ↔ archived`），不搬移或刪除 source。
 - 講義品質紅線:教為什麼、點名修正誤解(引用原話)、Lab 可執行或給閱讀任務、失敗案例並重。
 - 不確定關聯就不要硬連;`relations` 是手動宣告的權威邊,寧缺勿濫(自動候選邊由概念比對腳本另行產生,兩者分開存)。
 - **講義或課綱大幅改動時,同一個 session 要順手依 `pipeline/prompts/concepts.md` 重萃取 concepts**——概念過期會讓自動關聯失準。

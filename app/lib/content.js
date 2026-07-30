@@ -8,6 +8,7 @@ const COURSES_ROOT = process.env.COURSES_ROOT
   || path.join(__dirname, '..', '..', 'courses');
 
 const SAFE_SEG = /^[\w][\w.-]*$/; // slug 與檔名白名單,擋路徑跳脫
+const COURSE_STATUSES = new Set(['generating', 'active', 'archived']);
 
 function safeJoin(...segs) {
   for (const s of segs) {
@@ -16,10 +17,25 @@ function safeJoin(...segs) {
   return path.join(COURSES_ROOT, ...segs);
 }
 
+function metaPath(slug) {
+  return safeJoin(slug, 'meta.json');
+}
+
 function readMeta(slug) {
-  const p = path.join(COURSES_ROOT, slug, 'meta.json');
+  const p = metaPath(slug);
   if (!fs.existsSync(p)) return null;
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+}
+
+// 早期 meta 可能沒有 status;向後相容地當作 active。未知 status 也不該讓課程憑空消失。
+function courseStatus(meta) {
+  return meta && COURSE_STATUSES.has(meta.status) ? meta.status : 'active';
+}
+
+function courseInfo(slug) {
+  const meta = readMeta(slug);
+  if (!meta) throw Object.assign(new Error('course not found'), { status: 404 });
+  return { slug, meta, status: courseStatus(meta) };
 }
 
 function unitTitle(md) {
@@ -28,7 +44,7 @@ function unitTitle(md) {
 }
 
 function listUnits(slug) {
-  const dir = path.join(COURSES_ROOT, slug, 'units');
+  const dir = safeJoin(slug, 'units');
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir).filter(f => f.endsWith('.md')).sort().map(file => {
     const md = fs.readFileSync(path.join(dir, file), 'utf8');
@@ -36,14 +52,17 @@ function listUnits(slug) {
   });
 }
 
-function listCourses() {
+function listCourses({ status } = {}) {
   if (!fs.existsSync(COURSES_ROOT)) return [];
+  const wanted = status ? new Set(Array.isArray(status) ? status : [status]) : null;
   return fs.readdirSync(COURSES_ROOT)
     .filter(d => !d.startsWith('.') && !d.startsWith('_'))
     .map(slug => {
       const meta = readMeta(slug);
       if (!meta) return null;
-      return { slug, meta, units: listUnits(slug) };
+      const courseStatusValue = courseStatus(meta);
+      if (wanted && !wanted.has(courseStatusValue)) return null;
+      return { slug, meta, status: courseStatusValue, units: listUnits(slug) };
     })
     .filter(Boolean);
 }
@@ -78,4 +97,7 @@ function readCourseFile(slug, name) {
   return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
 }
 
-module.exports = { COURSES_ROOT, listCourses, readMeta, listUnits, readUnit, readCourseFile, parseQuestions };
+module.exports = {
+  COURSES_ROOT, SAFE_SEG, COURSE_STATUSES, safeJoin, metaPath,
+  courseStatus, courseInfo, listCourses, readMeta, listUnits, readUnit, readCourseFile, parseQuestions,
+};

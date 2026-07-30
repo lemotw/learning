@@ -24,6 +24,7 @@
 <div class="topbar">
   <a id="backLink" href="./">← 課程</a>
   <span id="crumb" class="dim crumb"></span>
+  <span id="archiveBadge" class="badge archived" hidden>已封存 · 唯讀</span>
   <span class="spacer"></span>
   <span class="dim hide-sm">狀態:</span>
   <button data-state="unread">未讀</button>
@@ -92,6 +93,29 @@ async function api(path, opts) {
   return r.json();
 }
 
+const isArchived = () => unitData && unitData.courseStatus === 'archived';
+
+function applyArchiveUI() {
+  if (!isArchived()) return;
+  const badge = document.getElementById('archiveBadge');
+  badge.hidden = false;
+  document.querySelectorAll('.topbar [data-state]').forEach(b => {
+    b.disabled = true; b.title = '課程已封存，請先還原才能修改進度';
+  });
+  const send = document.getElementById('chatSend');
+  const ta = document.getElementById('chatText');
+  send.disabled = true; send.title = '課程已封存，請先還原才能詢問助教';
+  ta.disabled = true; ta.placeholder = '課程已封存，請先還原才能詢問助教';
+  document.getElementById('newChat').disabled = true;
+  agentPick.disabled = true; modelPick.disabled = true;
+  document.querySelectorAll('#selfcheck textarea, #selfcheck button.primary').forEach(el => {
+    el.disabled = true; el.title = '課程已封存，請先還原才能作答';
+  });
+  document.querySelectorAll('#selfcheck .result').forEach(r => {
+    if (!r.textContent) r.textContent = '課程已封存，可查看歷次作答';
+  });
+}
+
 function setOffline() {
   if (!OFFLINE) {
     OFFLINE = true;
@@ -126,6 +150,7 @@ async function load() {
   unitData = await api(`api/unit?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
   document.title = unitData.courseTitle + ' · ' + unit;
   document.getElementById('crumb').textContent = unitData.courseTitle + ' / ' + unit.replace(/\.md$/, '');
+  if (isArchived()) document.getElementById('backLink').href = `./#/archive/${encodeURIComponent(course)}`;
   const mdEl = document.getElementById('md');
   mdEl.innerHTML = mdi.render(unitData.md);
   mermaid.run({ querySelector: '#md .mermaid' }).catch(()=>{});
@@ -146,7 +171,8 @@ async function load() {
   });
   renderStateButtons(unitData.state);
   setupNav();
-  renderSelfcheck();
+  renderSelfcheck().then(applyArchiveUI);
+  applyArchiveUI();
   // 選單要先建好,loadChatHistory 才有辦法把它還原成該段對話用的 agent
   loadAgents().then(loadChatHistory);
 }
@@ -154,8 +180,9 @@ async function load() {
 function renderStateButtons(state) {
   document.querySelectorAll('.topbar [data-state]').forEach(b => {
     b.classList.toggle('active', b.dataset.state === state);
+    b.disabled = !!isArchived();
     b.onclick = async () => {
-      if (OFFLINE) return;
+      if (OFFLINE || isArchived()) return;
       await api('api/progress', { method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ course, unit, state: b.dataset.state }) });
       renderStateButtons(b.dataset.state);
@@ -177,7 +204,9 @@ async function renderSelfcheck() {
   const el = document.getElementById('selfcheck');
   if (!unitData.questions.length) return;
   const attempts = await api(`api/selfcheck?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
-  el.innerHTML = '<h2>自答題(AI 批改)</h2><p class="dim">用自己的話、90 秒能講完的量。批改後才會顯示必含概念。</p>';
+  el.innerHTML = '<h2>自答題(AI 批改)</h2><p class="dim">' + (isArchived()
+    ? '這門課已封存，可查看歷次作答；還原後才能再次批改。'
+    : '用自己的話、90 秒能講完的量。批改後才會顯示必含概念。') + '</p>';
   for (const q of unitData.questions) {
     const hist = attempts.filter(a => a.question_id === q.id);
     const last = hist[hist.length - 1];
@@ -198,7 +227,7 @@ async function renderSelfcheck() {
     const result = card.querySelector('.result');
     const fb = card.querySelector('.feedback');
     btn.onclick = async () => {
-      if (OFFLINE || !ta.value.trim()) return;
+      if (OFFLINE || isArchived() || !ta.value.trim()) return;
       btn.disabled = true; result.textContent = '批改中…(本機 claude,約 10-30 秒)'; result.className = 'result thinking';
       try {
         const g = await api('api/selfcheck', { method: 'POST', headers: {'Content-Type':'application/json'},
@@ -224,6 +253,7 @@ async function renderSelfcheck() {
     el.appendChild(card);
   }
   if (OFFLINE) applyOfflineUI(); // 卡片長出來後補停用
+  if (isArchived()) applyArchiveUI();
 }
 
 // ---------- 助教對話 ----------
@@ -310,6 +340,7 @@ async function loadAgents() {
   if (!agentPick.value && AGENTS[0]) agentPick.value = AGENTS[0].id;
   agentPick.disabled = AGENTS.length < 2;
   renderModels();
+  applyArchiveUI();
 }
 
 agentPick.onchange = () => {
@@ -385,6 +416,7 @@ function setComposer() {
   const send = document.getElementById('chatSend');
   const ta = document.getElementById('chatText');
   if (OFFLINE) { applyOfflineUI(); return; }
+  if (isArchived()) { applyArchiveUI(); return; }
   send.disabled = false; ta.disabled = false;
   ta.placeholder = '問這份講義的任何問題…(Enter 送出,Shift+Enter 換行)';
 }
@@ -437,7 +469,7 @@ let nextNewSession = false;
 async function sendChat() {
   const ta = document.getElementById('chatText');
   const text = ta.value.trim();
-  if (OFFLINE || !text || sending) return;
+  if (OFFLINE || isArchived() || !text || sending) return;
   const newSession = nextNewSession; nextNewSession = false;
   sending = true; ta.value = '';
   addMsg('user', text);
@@ -451,6 +483,7 @@ async function sendChat() {
         session: newSession ? undefined : (curSession || undefined),
         agent: agentPick.value || undefined,
         model: modelPick.disabled ? undefined : modelPick.value }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
     const reader = r.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
@@ -494,6 +527,7 @@ document.getElementById('chatText').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
 });
 document.getElementById('newChat').onclick = () => {
+  if (isArchived() || OFFLINE) return;
   chatlog.innerHTML = '';
   stick = true;
   nextNewSession = true;

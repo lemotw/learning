@@ -95,6 +95,10 @@
   .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
   .detail-track { display: flex; gap: 4px; margin: 14px 0 16px; }
   .detail-track .seg { height: 6px; border-radius: 3px; }
+  .course-action { flex: none; font: inherit; font-size: 12px; font-weight: 650; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 8px; background: transparent; padding: 5px 9px; cursor: pointer; }
+  .course-action:hover { color: var(--accent); border-color: var(--accent); }
+  .course-action.archive { color: var(--reading); }
 
   .units { list-style: none; margin: 0; padding: 4px 18px; }
   .unit { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
@@ -122,6 +126,24 @@
   .rec a:hover { text-decoration: underline; }
   .redo-badge { color: var(--redo); font-weight: 700; }
   .empty { padding: 14px 18px; font-size: 12.5px; color: var(--muted); }
+
+  /* 封存區:不是刪除，而是把原課程從 active 工作面抽走，來源仍在 courses/。 */
+  .archive-head { display: flex; gap: 10px; align-items: center; margin: 0 0 14px; }
+  .archive-head h2 { margin: 0; font-size: 19px; flex: 1; }
+  .archive-search { width: 100%; font: inherit; font-size: 14px; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 11px; padding: 10px 13px; outline: 0; margin-bottom: 12px; }
+  .archive-search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .archive-card, .archive-result { padding: 14px 18px; border-top: 1px solid var(--line); }
+  .archive-card:first-child, .archive-result:first-child { border-top: 0; }
+  .archive-card-head { display: flex; gap: 10px; align-items: baseline; }
+  .archive-card h3 { margin: 0; font-size: 15px; flex: 1; }
+  .archive-card .meta, .archive-result .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .archive-result a { color: var(--text); font-size: 14px; font-weight: 700; text-decoration: none; }
+  .archive-result a:hover { color: var(--accent); }
+  .archive-result .snippet { color: var(--muted); font-size: 12.5px; margin-top: 4px; line-height: 1.55; }
+  .archive-kind { display: inline-block; color: var(--accent); background: var(--accent-soft); border-radius: 999px;
+    padding: 1px 7px; font-size: 10.5px; font-weight: 700; margin-right: 5px; }
+  .archive-note { color: var(--muted); font-size: 12.5px; margin: -4px 0 12px; }
 
   .cy-wrap { position: relative; }
   #cy { height: calc(100vh - 220px); min-height: 460px; border: 1px solid var(--line);
@@ -209,7 +231,7 @@
 <script>
 const CYCLE = { unread: 'reading', reading: 'done', done: 'unread' };
 const LABEL = { unread: '未讀', reading: '閱讀中', done: '已讀' };
-let COURSES = [], REDO = [];
+let COURSES = [], ARCHIVED = [], REDO = [];
 let OFFLINE = false; // 由 load() 依 SW 的 X-Sw-Cache 標頭判定
 let GRAPH = { edges: [] }; // /api/graph 的合併邊(手動 + 自動候選)
 let cy = null; // 圖譜 lazy init
@@ -225,6 +247,8 @@ const nextUnit = c => c.units.find(u => u.state !== 'done') || null;
 function route() {
   const h = location.hash;
   if (h.startsWith('#/c/')) return { page: 'detail', slug: decodeURIComponent(h.slice(4)) };
+  if (h.startsWith('#/archive/')) return { page: 'archive-detail', slug: decodeURIComponent(h.slice(10)) };
+  if (h === '#/archive') return { page: 'archive' };
   if (h === '#/graph') return { page: 'graph' };
   if (h === '#/scoring') return { page: 'scoring' };
   return { page: 'overview' };
@@ -233,6 +257,7 @@ function route() {
 function tabsHTML(cur) {
   return `<div class="hub-tabs">
     <button class="hub-tab ${cur === 'progress' ? 'on' : ''}" data-nav="">課程</button>
+    <button class="hub-tab ${cur === 'archive' ? 'on' : ''}" data-nav="#/archive">封存${ARCHIVED.length ? ` (${ARCHIVED.length})` : ''}</button>
     <button class="hub-tab ${cur === 'graph' ? 'on' : ''}" data-nav="#/graph">圖譜</button>
     <button class="hub-tab ${cur === 'scoring' ? 'on' : ''}" data-nav="#/scoring">計分比較</button>
     ${OFFLINE ? '<span class="off-badge">離線瀏覽</span>' : ''}
@@ -281,7 +306,7 @@ function overviewHTML() {
 }
 
 function courseTitle(slug) {
-  const c = COURSES.find(x => x.slug === slug);
+  const c = COURSES.find(x => x.slug === slug) || ARCHIVED.find(x => x.slug === slug);
   return c ? c.title : slug;
 }
 
@@ -298,13 +323,90 @@ function detailHTML(slug) {
   // 課程專頁保留頂部 tab:進到一門課還是在「課程」這個分頁裡,只是看得更細,
   // 沒理由把切到圖譜/計分的入口收掉。真正離開 hub 的只有講義(reader.html)。
   return tabsHTML('progress') + `<a class="back" href="#">← 全部課程</a>
-    <div class="detail-head"><h2>${esc(c.title)}</h2><span class="detail-count"><b>${c.done}</b> / ${c.total} 已讀</span></div>
+    <div class="detail-head"><h2>${esc(c.title)}</h2><span class="detail-count"><b>${c.done}</b> / ${c.total} 已讀</span>
+      <button class="course-action archive" type="button" data-archive="${esc(c.slug)}" ${OFFLINE ? 'disabled title="離線時不能變更課程狀態"' : ''}>封存課程</button></div>
     <div class="detail-meta">
       <span class="last-read">${last}</span>
       ${(c.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('')}
     </div>
     <div class="detail-track">${c.units.map(u => `<div class="seg s-${u.state}"></div>`).join('')}</div>
     <div class="panel-list"><ul class="units">${rows}</ul></div>`;
+}
+
+function archiveCardHTML(c) {
+  const date = c.archivedAt ? new Date(c.archivedAt).toLocaleDateString('zh-TW') : '未知日期';
+  return `<div class="archive-card">
+    <div class="archive-card-head"><h3><a href="#/archive/${encodeURIComponent(c.slug)}">${esc(c.title)}</a></h3>
+      <span class="tag">${c.total} units</span></div>
+    <div class="meta">封存於 ${esc(date)} · 保留原進度 ${c.done}/${c.total}</div>
+  </div>`;
+}
+
+function archiveDetailHTML(slug) {
+  const c = ARCHIVED.find(x => x.slug === slug);
+  if (!c) return archiveHTML();
+  const date = c.archivedAt ? new Date(c.archivedAt).toLocaleString('zh-TW') : '未知日期';
+  const rows = c.units.map((u, i) => `<li class="unit">
+    <span class="u-no">${i + 1}</span>
+    <a class="u-title ${u.state === 'done' ? 'is-done' : ''}" href="${readerUrl(c.slug, u.file)}" target="_blank" rel="noopener">${esc(u.title)}</a>
+    <span class="tag">${LABEL[u.state]}</span>
+  </li>`).join('');
+  return tabsHTML('archive') + `<a class="back" href="#/archive">← 封存課程</a>
+    <div class="detail-head"><h2>${esc(c.title)}</h2>
+      <button class="course-action" type="button" data-restore="${esc(c.slug)}" ${OFFLINE ? 'disabled title="離線時不能變更課程狀態"' : ''}>還原為進行中</button></div>
+    <div class="detail-meta"><span class="last-read">封存於 ${esc(date)}</span>
+      ${(c.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>
+    <p class="archive-note">講義、課綱與學習紀錄都仍在本機。開啟講義可唯讀回看；要繼續學習請先還原。</p>
+    <div class="panel-list"><ul class="units">${rows || '<li class="empty">這門課沒有單元</li>'}</ul></div>`;
+}
+
+function archiveHTML() {
+  return tabsHTML('archive') + `<div class="archive-head"><h2>封存課程</h2><span class="detail-count">${ARCHIVED.length} 門</span></div>
+    <p class="archive-note">封存不會刪除任何 source 或學習紀錄。搜尋課名、課綱和講義內容；封存課以唯讀方式開啟。</p>
+    <input id="archiveSearch" class="archive-search" type="search" autocomplete="off" placeholder="搜尋封存講義與課綱…">
+    <div class="panel-list" id="archiveList">${ARCHIVED.length ? ARCHIVED.map(archiveCardHTML).join('') : '<div class="empty">還沒有封存課程</div>'}</div>`;
+}
+
+function renderArchiveSearch(results, query) {
+  const el = document.getElementById('archiveList');
+  if (!el) return;
+  if (!query || query.trim().length < 2) {
+    el.innerHTML = ARCHIVED.length ? ARCHIVED.map(archiveCardHTML).join('') : '<div class="empty">還沒有封存課程</div>';
+    return;
+  }
+  if (!results.length) {
+    el.innerHTML = `<div class="empty">找不到「${esc(query.trim())}」；搜尋範圍是課名、tags、課綱與講義。</div>`;
+    return;
+  }
+  const kind = { course: '課程', agenda: '課綱', unit: '講義' };
+  el.innerHTML = results.map(r => {
+    const href = r.unit ? readerUrl(r.course, r.unit) : `#/archive/${encodeURIComponent(r.course)}`;
+    const target = r.unit ? ' target="_blank" rel="noopener"' : '';
+    return `<div class="archive-result"><span class="archive-kind">${esc(kind[r.kind] || r.kind)}</span>
+      <a href="${href}"${target}>${esc(r.courseTitle)} · ${esc(r.title)}</a>
+      <div class="snippet">${esc(r.excerpt)}</div></div>`;
+  }).join('');
+}
+
+function initArchiveSearch() {
+  const input = document.getElementById('archiveSearch');
+  if (!input) return;
+  let timer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const query = input.value;
+    if (query.trim().length < 2) { renderArchiveSearch([], query); return; }
+    timer = setTimeout(async () => {
+      try {
+        const r = await fetch(`api/archive/search?q=${encodeURIComponent(query)}`, { cache: 'no-store' });
+        if (!r.ok) throw new Error(r.status);
+        renderArchiveSearch(await r.json(), query);
+      } catch {
+        const el = document.getElementById('archiveList');
+        if (el) el.innerHTML = '<div class="empty">搜尋暫時不可用，確認已連上 learning hub。</div>';
+      }
+    }, 180);
+  });
 }
 
 function graphHTML() {
@@ -741,14 +843,17 @@ function render() {
   document.getElementById('main').classList.toggle('wide', r.page === 'graph' || r.page === 'scoring');
   document.getElementById('view').innerHTML =
     r.page === 'detail' ? detailHTML(r.slug)
+    : r.page === 'archive-detail' ? archiveDetailHTML(r.slug)
+    : r.page === 'archive' ? archiveHTML()
     : r.page === 'graph' ? graphHTML()
     : r.page === 'scoring' ? scoringHTML()
     : overviewHTML();
+  if (r.page === 'archive') initArchiveSearch();
   if (r.page === 'graph') initGraph();
   if (r.page === 'scoring') initScoring();
   const totalUnits = COURSES.reduce((n, c) => n + c.total, 0);
   document.getElementById('foot').textContent =
-    COURSES.length ? `${COURSES.length} courses · ${totalUnits} units` : '';
+    COURSES.length ? `${COURSES.length} courses · ${totalUnits} units${ARCHIVED.length ? ` · ${ARCHIVED.length} archived` : ''}` : '';
 }
 
 async function load() {
@@ -757,10 +862,11 @@ async function load() {
       fetch('api/courses', { cache: 'no-store' }),
       fetch('api/redo', { cache: 'no-store' }),
       fetch('api/graph', { cache: 'no-store' }),
+      fetch('api/archive', { cache: 'no-store' }),
     ]);
     OFFLINE = rs.some(r => PWA.fromCache(r));
-    const [c, redo, g] = await Promise.all(rs.map(r => r.json()));
-    COURSES = c; REDO = redo; GRAPH = g;
+    const [c, redo, g, archived] = await Promise.all(rs.map(r => r.json()));
+    COURSES = c; REDO = redo; GRAPH = g; ARCHIVED = archived;
     render();
     if (!OFFLINE) PWA.syncContent(COURSES); // fire-and-forget:把單元內容抓進離線快取
   } catch (e) {
@@ -782,6 +888,42 @@ document.addEventListener('click', async e => {
   }
   const row = e.target.closest('[data-course]');
   if (row) { location.hash = '#/c/' + row.dataset.course; return; }
+  const archiveAction = e.target.closest('[data-archive]');
+  if (archiveAction) {
+    const slug = archiveAction.dataset.archive;
+    const c = COURSES.find(x => x.slug === slug);
+    if (!c || OFFLINE) return;
+    if (!confirm(`封存「${c.title}」？\n\n講義、課綱、labs 與所有學習紀錄都會保留在本機；它只會從目前學習、待回爐與預設圖譜移除。`)) return;
+    archiveAction.disabled = true;
+    try {
+      const r = await fetch(`api/courses/${encodeURIComponent(slug)}/archive`, { method: 'POST' });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+      location.hash = '#/archive';
+      await load();
+    } catch (err) {
+      archiveAction.disabled = false;
+      alert(`封存失敗：${err.message}`);
+    }
+    return;
+  }
+  const restoreAction = e.target.closest('[data-restore]');
+  if (restoreAction) {
+    const slug = restoreAction.dataset.restore;
+    const c = ARCHIVED.find(x => x.slug === slug);
+    if (!c || OFFLINE) return;
+    if (!confirm(`還原「${c.title}」為進行中課程？\n\n原有進度、作答與助教對話會直接接續。`)) return;
+    restoreAction.disabled = true;
+    try {
+      const r = await fetch(`api/courses/${encodeURIComponent(slug)}/restore`, { method: 'POST' });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+      location.hash = '#/c/' + encodeURIComponent(slug);
+      await load();
+    } catch (err) {
+      restoreAction.disabled = false;
+      alert(`還原失敗：${err.message}`);
+    }
+    return;
+  }
   const chip = e.target.closest('.chip');
   if (chip) {
     const slug = chip.dataset.c, file = chip.dataset.u;

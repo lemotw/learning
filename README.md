@@ -19,7 +19,7 @@
                │ 生成(LLM 在場的 session)
                ▼
 ┌─ 內容層 courses/<slug>/(唯讀、gitignored)──────────────────┐
-│ meta.json(標題/狀態/concepts/relations)                    │
+│ meta.json(標題/狀態/concepts/relations/archivedAt)         │
 │ DIAGNOSTIC.md(診斷問答,永久留檔)  AGENDA.md(課綱)       │
 │ units/*.md(講義)  labs/(實驗檔)                          │
 └──────────────┬──────────────────────────────────────────────┘
@@ -32,7 +32,8 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-設計原則:**內容層對 app 永遠唯讀;一切可變狀態集中在 `app/data/`**。課程 md 是唯一真相,
+設計原則:**內容層對一般 app 流程永遠唯讀;一切學習狀態集中在 `app/data/`**。唯一例外是
+`app/lib/course-lifecycle.js`:它是受控邊界,只能原子更新 `meta.json` 的封存狀態,不搬移、不刪除任何課程檔。課程 md 是唯一真相,
 資料庫壞了只丟學習記錄不丟內容。
 
 ## 課程生成流程(`/new-course`,skill 驅動)
@@ -108,7 +109,7 @@
 **執行期(`pipeline/relations.js`,純本機、零 LLM)**:
 
 ```
-讀各課 concepts → Ollama bge-m3 embed「name——desc」(內容 hash 快取)
+讀 active 課的 concepts → Ollama bge-m3 embed「name——desc」(內容 hash 快取)
 → centering(減全概念平均向量,消同文體基線/anisotropy)
 → 雙向 MaxSim(A 每個概念到 B 取最佳 cosine,平均;ColBERT late interaction)
 → 空隙偵測(分數排序取最大相鄰落差切線)選邊
@@ -117,7 +118,7 @@
 
 - 手動覆寫層:meta.json `relations`(平時空;要標 `prereq` 方向或宣告 IE 沒抓到的邊才用),
   同配對手動優先
-- `/api/graph` 合併兩源;前端 tooltip 顯示相似度 + 概念呼應證據
+- `/api/graph` 合併兩源;前端 tooltip 顯示相似度 + 概念呼應證據。封存課不參與預設圖譜，還原後背景重算
 - Ollama 未啟動時腳本優雅跳過,保留上次結果
 
 ### 選型依據(實驗封存於 `archive/relations-experiments/`)
@@ -126,12 +127,22 @@
 概念萃取 + MaxSim(唯一排序全對,自帶證據)、指令式 embedding(qwen3-embedding,免後處理但壓不掉模糊邊)。
 結論與文獻一致:關係發現用 GraphRAG 式 schema-guided extraction + multi-vector late interaction 為主幹。
 
+## 課程封存與來源搜尋
+
+封存是 `meta.json` 的狀態轉移，不是刪除：`active → archived → active`。
+
+- **保留一切資料**：`courses/<slug>/` 原路徑不動，講義／課綱／labs／DIAGNOSTIC，以及 SQLite 的進度、自答與助教歷程均不刪除。
+- **工作面隔離**：首頁、總進度、待回爐、預設知識圖譜只出 active 課；封存課在首頁「封存」tab 瀏覽。
+- **唯讀回看**：封存講義仍能閱讀、看歷史自答與助教對話；progress、批改與新助教訊息由前後端共同停用。還原後直接接續原進度。
+- **來源搜尋**：封存 tab 可搜尋課名、tags、concepts、`AGENDA.md` 和 `units/*.md`。搜尋是依檔案 mtime/size 增量建立的記憶體 snapshot，source 仍是唯一真相；初版刻意不索引 DIAGNOSTIC、SQLite 歷程與 labs。
+- **併發**：助教串流或批改進行時暫拒封存（409），避免操作完成後寫進已封存課。
+
 ## 離線閱讀(PWA)
 
 `app/web/sw.js` + `pwa.js` + `manifest.json`,零依賴、無 build,server 端只加了三個 MIME 型別:
 
 - **快取策略**:shell(html/css/pwa.js)stale-while-revalidate;vendor cache-first(換檔手動 bump `sw.js` 的 `CACHE_VERSION`);GET `api/*` network-first(4s timeout)斷線退快取;**非 GET 完全不攔**(進度/批改/助教 SSE 原生走網路)
-- **內容預下載**:index 在線載入後把全部單元的講義+自答歷史+助教對話抓一輪進快取(30 分鐘節流,單元數變動即重抓)
+- **內容預下載**:index 在線載入後把全部 active 單元的講義+自答歷史+助教對話抓一輪進快取(30 分鐘節流,單元數變動即重抓);封存課只在使用者主動開啟後依正常 GET 快取
 - **離線判定**:SW 退快取時加 `X-Sw-Cache: hit` 標頭,頁面據此顯示離線徽章並停用助教/批改/進度按鈕(不用 `navigator.onLine`——手機有網路但不在 tailnet 時它會誤判)
 - 手機:以 ts.net HTTPS 造訪一次後即可離線閱讀;建議「加入主畫面」(iOS 對主畫面 App 豁免 7 天儲存回收)
 - 路徑全相對,根路徑與反代子路徑(`/learning/`)部署皆可
