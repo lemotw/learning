@@ -10,6 +10,7 @@ const { URL } = require('node:url');
 const store = require('./lib/db');
 const content = require('./lib/content');
 const chat = require('./lib/chat');
+const agents = require('./lib/agents');
 
 const PORT = Number(process.env.PORT || 4600);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -228,17 +229,39 @@ async function handleApi(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/chat/history') {
     const course = q.get('course'), unit = q.get('unit');
-    const sess = store.latestChatSession(course, unit);
-    if (!sess) return json(res, 200, { sessionId: null, messages: [] });
-    return json(res, 200, { sessionId: sess.session_id, messages: store.chatHistory(course, unit, sess.session_id) });
+    // 只有 session 沒訊息的情況(對話失敗後留下的空殼)不列出來
+    const sessions = store.chatSessions(course, unit).filter(s => s.n > 0);
+    // 沒指定就給最新那段(維持原本行為);指定了就給那段
+    const want = q.get('session');
+    const sess = want ? sessions.find(s => s.session_id === want) : sessions[0];
+    const latest = sessions.length ? sessions[0].session_id : null;
+    if (!sess) return json(res, 200, { sessionId: null, latest, messages: [], sessions });
+    // 帶上 agent / model,前端才能把選單還原成這段對話當初用的設定
+    return json(res, 200, {
+      sessionId: sess.session_id, agent: sess.agent, model: sess.model, latest,
+      messages: store.chatHistory(course, unit, sess.session_id),
+      sessions,
+    });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/agents') {
+    return json(res, 200, agents.list());
   }
 
   if (req.method === 'POST' && url.pathname === '/api/chat') {
-    const { course, unit, message, newSession } = await readBody(req);
+    const { course, unit, message, newSession, agent, model, session } = await readBody(req);
     if (!message || !message.trim()) return json(res, 400, { error: 'empty message' });
     const { raw } = content.readUnit(course, unit);
 
-    const prev = newSession ? null : store.latestChatSession(course, unit);
+    // session 有給就續那一段(前端的歷史下拉),沒給就續最新那段
+    let prev = newSession ? null
+      : (session ? store.chatSession(course, unit, session) : store.latestChatSession(course, unit));
+    const def = agents.resolve(agent || (prev ? prev.agent : agents.DEFAULT_AGENT));
+    if (!def) return json(res, 503, { error: '本機找不到任何可用的 agent CLI' });
+    // session 不能跨 agent 續聊(claude 與 pi 的 session 格式與 id 空間都不同),
+    // 所以換 agent 等於開新對話 —— 這裡把 prev 丟掉,systemPrompt 才會重新帶上。
+    if (prev && prev.agent !== def.id) prev = null;
+
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache',
@@ -248,21 +271,26 @@ async function handleApi(req, res, url) {
     const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
     try {
-      const { sessionId, text } = await chat.streamChat({
+      const { sessionId, text, model: used, resumeLost } = await def.driver.stream({
         message,
-        resumeSessionId: prev ? prev.session_id : null,
-        systemPrompt: prev ? null : tutorSystemPrompt(course, unit, raw),
+        resume: prev ? prev.session_id : null,
+        // 一律備好:driver 只在沒 resume 時用它,但 resume 失敗退成新 session 時要靠它
+        systemPrompt: tutorSystemPrompt(course, unit, raw),
+        model: model || (prev ? prev.model : def.defaultModel),
+        // pi 的 session id 自己命名,要知道這是該單元第幾段對話
+        course, unit, seq: store.chatSessionCount(course, unit) + 1,
         onDelta: (t) => send('delta', { text: t }),
       });
-      if (!prev && sessionId) {
-        store.addChatSession(course, unit, sessionId);
-        store.addRecord(course, unit, 'chat', '開新對話');
+      // resumeLost = 想續的那段 session 檔已不在,driver 退成開新的一段
+      if ((!prev || resumeLost) && sessionId && !store.chatSession(course, unit, sessionId)) {
+        store.addChatSession(course, unit, sessionId, def.id, used || null);
+        store.addRecord(course, unit, 'chat', `開新對話(${def.label}${used ? ' / ' + used : ''})`);
       }
       if (sessionId) {
         store.addChatMessage(course, unit, sessionId, 'user', message);
         store.addChatMessage(course, unit, sessionId, 'assistant', text);
       }
-      send('done', { sessionId, text });
+      send('done', { sessionId, text, agent: def.id, model: used || null, resumeLost: !!resumeLost });
     } catch (e) {
       send('error', { error: String(e.message || e) });
     }

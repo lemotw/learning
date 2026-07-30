@@ -55,6 +55,17 @@ db.exec(`
   );
 `);
 
+// 冪等 migration:記「這段對話是哪個 agent / 哪個模型開的」。
+// 沒這兩欄的話重新載入頁面後無法決定該用哪個 driver 續聊。
+// 既有資料(27 筆 session)全是 claude 開的,所以 DEFAULT 'claude' 是對的。
+for (const [col, ddl] of [
+  ['agent', "ALTER TABLE chat_sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude'"],
+  ['model', 'ALTER TABLE chat_sessions ADD COLUMN model TEXT'],
+]) {
+  const cols = db.prepare('PRAGMA table_info(chat_sessions)').all().map(c => c.name);
+  if (!cols.includes(col)) db.exec(ddl);
+}
+
 const now = () => new Date().toISOString();
 
 module.exports = {
@@ -109,9 +120,39 @@ module.exports = {
     ).get(course, unit);
   },
 
-  addChatSession(course, unit, sessionId) {
-    db.prepare('INSERT INTO chat_sessions (course, unit, session_id, created_at) VALUES (?, ?, ?, ?)')
-      .run(course, unit, sessionId, now());
+  addChatSession(course, unit, sessionId, agent = 'claude', model = null) {
+    db.prepare(`INSERT INTO chat_sessions (course, unit, session_id, created_at, agent, model)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(course, unit, sessionId, now(), agent, model);
+  },
+
+  // pi 的 session id 由 course+unit+seq 推導,需要知道這個單元已經開過幾段
+  chatSessionCount(course, unit) {
+    return db.prepare('SELECT COUNT(*) n FROM chat_sessions WHERE course = ? AND unit = ?')
+      .get(course, unit).n;
+  },
+
+  chatSession(course, unit, sessionId) {
+    return db.prepare(
+      'SELECT * FROM chat_sessions WHERE course = ? AND unit = ? AND session_id = ?'
+    ).get(course, unit, sessionId);
+  },
+
+  // 列出一個單元的所有對話段落(給前端的歷史下拉)。
+  // 首句 user 訊息當摘要;則數/最後時間用來排版標籤。
+  chatSessions(course, unit) {
+    return db.prepare(`
+      SELECT s.session_id, s.created_at, s.agent, s.model,
+        (SELECT COUNT(*) FROM chat_messages m
+          WHERE m.course = s.course AND m.unit = s.unit AND m.session_id = s.session_id) AS n,
+        (SELECT m.content FROM chat_messages m
+          WHERE m.course = s.course AND m.unit = s.unit AND m.session_id = s.session_id
+            AND m.role = 'user' ORDER BY m.id ASC LIMIT 1) AS first_ask,
+        (SELECT MAX(m.ts) FROM chat_messages m
+          WHERE m.course = s.course AND m.unit = s.unit AND m.session_id = s.session_id) AS last_ts
+      FROM chat_sessions s
+      WHERE s.course = ? AND s.unit = ?
+      ORDER BY s.id DESC
+    `).all(course, unit);
   },
 
   addChatMessage(course, unit, sessionId, role, content) {

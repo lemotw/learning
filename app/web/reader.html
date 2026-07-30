@@ -50,6 +50,16 @@
       <button id="newChat" title="開新對話">＋新對話</button>
       <button id="chatClose" title="關閉">✕</button>
     </header>
+    <div class="chatbar" id="chatBar" hidden>
+      <select id="agentPick" title="選擇助教 agent"></select>
+      <select id="modelPick" title="選擇模型"></select>
+      <span class="dim" id="agentNote"></span>
+    </div>
+    <!-- 歷史對話自己一列:三個 select 塞不進 380px 側欄扣掉 padding 的 352px -->
+    <div class="chatbar" id="sessRow" hidden>
+      <select id="sessPick" title="切換歷史對話"></select>
+      <span class="dim" id="sessNote"></span>
+    </div>
     <div class="chatlog" id="chatlog"></div>
     <div class="chatinput">
       <textarea id="chatText" placeholder="問這份講義的任何問題…(Enter 送出,Shift+Enter 換行)"></textarea>
@@ -137,7 +147,8 @@ async function load() {
   renderStateButtons(unitData.state);
   setupNav();
   renderSelfcheck();
-  loadChatHistory();
+  // 選單要先建好,loadChatHistory 才有辦法把它還原成該段對話用的 agent
+  loadAgents().then(loadChatHistory);
 }
 
 function renderStateButtons(state) {
@@ -244,6 +255,84 @@ chatlog.addEventListener('scroll', () => { stick = atBottom(); });
 const followBottom = () => { if (stick) chatlog.scrollTop = chatlog.scrollHeight; };
 const jumpBottom = () => { stick = true; chatlog.scrollTop = chatlog.scrollHeight; };
 
+// ---------- agent / 模型選擇 ----------
+// 只有一個 agent 可用時整列隱藏:給假選擇比少一個選項糟。
+// 選擇存 localStorage,因為上一/下一單元是整頁重新載入。
+const chatBar = document.getElementById('chatBar');
+const agentPick = document.getElementById('agentPick');
+const modelPick = document.getElementById('modelPick');
+const agentNote = document.getElementById('agentNote');
+let AGENTS = [];
+
+const savedPick = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
+const savePick = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+
+function curAgent() { return AGENTS.find(a => a.id === agentPick.value) || null; }
+
+function renderModels() {
+  const a = curAgent();
+  const models = (a && a.models) || [];
+  if (!models.length) {
+    // 問不到清單(例如 pi --list-models 失敗)就不假裝能選
+    modelPick.innerHTML = '<option>(由 agent 自己決定)</option>';
+    modelPick.disabled = true;
+  } else {
+    // 偏好要分 agent 存,不然切 agent 會把 claude 的 model id 帶到 pi 去(對不上)
+    const want = savedPick(`chatModel:${a.id}`, a.defaultModel);
+    const opt = m => `<option value="${m.id}"${m.id === want ? ' selected' : ''}>${esc(m.label)}</option>`;
+    // pi 有 20+ 個模型橫跨多個 provider,分組才找得到東西
+    const groups = [];
+    for (const m of models) {
+      const g = m.provider || '';
+      if (!groups.length || groups[groups.length - 1].g !== g) groups.push({ g, items: [] });
+      groups[groups.length - 1].items.push(m);
+    }
+    modelPick.disabled = false;
+    modelPick.innerHTML = groups.map(({ g, items }) => g
+      ? `<optgroup label="${esc(g)}">${items.map(opt).join('')}</optgroup>`
+      : items.map(opt).join('')).join('');
+    modelPick.title = (models.find(m => m.id === modelPick.value) || {}).note || '選擇模型';
+  }
+  agentNote.textContent = (a && a.note) || '';
+  agentNote.title = agentNote.textContent;
+}
+
+async function loadAgents() {
+  try {
+    AGENTS = (await api('api/agents')).filter(a => a.available);
+  } catch { AGENTS = []; }
+  // 只有一個 agent 又只有一個模型時,這一列沒有任何可選的東西,直接收掉
+  const models0 = ((AGENTS[0] || {}).models || []).length;
+  chatBar.hidden = AGENTS.length === 0 || (AGENTS.length === 1 && models0 < 2);
+  const want = savedPick('chatAgent', 'claude');
+  agentPick.innerHTML = AGENTS.map(a =>
+    `<option value="${a.id}"${a.id === want ? ' selected' : ''}>${esc(a.label)}</option>`).join('');
+  if (!agentPick.value && AGENTS[0]) agentPick.value = AGENTS[0].id;
+  agentPick.disabled = AGENTS.length < 2;
+  renderModels();
+}
+
+agentPick.onchange = () => {
+  savePick('chatAgent', agentPick.value);
+  renderModels();
+  // session 不能跨 agent 續聊,所以換 agent 一定是開新對話 —— 講清楚,
+  // 不然使用者會以為助教突然失憶
+  nextNewSession = true;
+  curSession = null;         // 換 agent 一定是開新的一段
+  sessNote.textContent = '';
+  const a = curAgent();
+  const d = document.createElement('div');
+  d.className = 'msg switch';
+  d.textContent = `── 已切換到 ${a ? a.label : agentPick.value},以下是新的一段對話 ──`;
+  chatlog.appendChild(d);
+  jumpBottom();
+};
+modelPick.onchange = () => {
+  const a = curAgent();
+  if (a) savePick(`chatModel:${a.id}`, modelPick.value);
+  modelPick.title = ((a || {}).models || []).find(m => m.id === modelPick.value)?.note || '';
+};
+
 function addMsg(role, text) {
   const d = document.createElement('div');
   d.className = 'msg ' + role;
@@ -259,10 +348,82 @@ function setMsgText(el, text, role) {
   else b.textContent = text;
 }
 
-async function loadChatHistory() {
+// ---------- 歷史對話 ----------
+// chat_sessions 一直都存著每一段對話,但 /api/chat/history 以前只吐最新那段,
+// 按過「＋新對話」或換過 agent 的舊紀錄就從 UI 消失了(DB 裡還在)。這裡把它們列出來。
+const sessRow = document.getElementById('sessRow');
+const sessPick = document.getElementById('sessPick');
+const sessNote = document.getElementById('sessNote');
+let latestSession = null;
+let curSession = null;   // 目前在看/要續的那一段
+
+const pad = n => String(n).padStart(2, '0');
+const shortTs = iso => {
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+function agentLabel(id) {
+  const a = AGENTS.find(x => x.id === id);
+  return a ? a.label : (id || '?');
+}
+
+function renderSessions(list, cur) {
+  sessRow.hidden = list.length < 2;   // 只有一段就沒有「切換」的意義
+  sessPick.innerHTML = list.map((s, i) => {
+    const ask = (s.first_ask || '').replace(/\s+/g, ' ').slice(0, 18);
+    const tail = i === 0 ? '(最新)' : '';
+    return `<option value="${s.session_id}"${s.session_id === cur ? ' selected' : ''}>`
+      + `${shortTs(s.created_at)} · ${agentLabel(s.agent)} · ${s.n} 則${tail} · ${esc(ask)}</option>`;
+  }).join('');
+}
+
+// 舊對話可以直接續聊 —— 實測 claude --resume 接 5 天前 18 則的 session 沒問題,
+// 30 段裡只有最舊 2 段的 session 檔已被 CLI 清掉;那種情況 driver 會自動退成
+// 開新的一段並回報 resumeLost,不是硬錯。所以這裡只在離線時停用輸入框。
+function setComposer() {
+  const send = document.getElementById('chatSend');
+  const ta = document.getElementById('chatText');
+  if (OFFLINE) { applyOfflineUI(); return; }
+  send.disabled = false; ta.disabled = false;
+  ta.placeholder = '問這份講義的任何問題…(Enter 送出,Shift+Enter 換行)';
+}
+
+async function showSession(sessionId) {
+  const qsp = `course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`
+    + (sessionId ? `&session=${encodeURIComponent(sessionId)}` : '');
+  const h = await api(`api/chat/history?${qsp}`);
+  latestSession = h.latest;
+  chatlog.innerHTML = '';
+  for (const m of h.messages) addMsg(m.role, m.content);
+  renderSessions(h.sessions || [], h.sessionId);
+  // 續聊的目標:使用者當下在看哪一段就續那一段(不再是一律續最新那段)
+  curSession = h.sessionId || null;
+  sessNote.textContent = (h.sessionId && h.sessionId !== h.latest) ? '接著這段聊' : '';
+  setComposer();
+  // 選單還原成這段對話當初用的設定,不然畫面顯示的 agent 跟實際續聊的會不一致
+  if (h.agent && AGENTS.some(a => a.id === h.agent)) {
+    agentPick.value = h.agent;
+    renderModels();
+    if (h.model) modelPick.value = h.model;
+  }
+  return h;
+}
+
+sessPick.onchange = () => showSession(sessPick.value).then(jumpBottom).catch(() => {});
+
+/** 開新 session 後刷新清單(則數與最新那段都變了) */
+async function refreshSessions() {
   try {
     const h = await api(`api/chat/history?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
-    for (const m of h.messages) addMsg(m.role, m.content);
+    latestSession = h.latest;
+    renderSessions(h.sessions || [], h.latest);
+  } catch {}
+}
+
+async function loadChatHistory() {
+  try {
+    const h = await showSession(null);
     // 手機上不自動展開,避免一進頁面就蓋住講義
     if (h.messages.length && window.matchMedia('(min-width: 821px)').matches) {
       panel.classList.remove('collapsed');
@@ -285,7 +446,11 @@ async function sendChat() {
   let acc = '';
   try {
     const r = await fetch('api/chat', { method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ course, unit, message: text, newSession }) });
+      body: JSON.stringify({ course, unit, message: text, newSession,
+        // 續「當下在看的那一段」,不是一律續最新那段
+        session: newSession ? undefined : (curSession || undefined),
+        agent: agentPick.value || undefined,
+        model: modelPick.disabled ? undefined : modelPick.value }) });
     const reader = r.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
@@ -301,13 +466,27 @@ async function sendChat() {
         if (!ev || !dataLine) continue;
         const data = JSON.parse(dataLine);
         if (ev === 'delta') { acc += data.text; setMsgText(holder, acc, 'assistant'); followBottom(); }
-        if (ev === 'done') { setMsgText(holder, data.text || acc, 'assistant'); }
+        if (ev === 'done') {
+          setMsgText(holder, data.text || acc, 'assistant');
+          curSession = data.sessionId || curSession;
+          if (data.resumeLost) {
+            // 想續的那段 session 檔已被 CLI 清掉,driver 退成開新的一段 ——
+            // 講清楚,不然使用者只會覺得助教突然失憶
+            const d = document.createElement('div');
+            d.className = 'msg switch';
+            d.textContent = '── 這段舊對話的 CLI session 已不存在,以上是新開的一段（講義 context 有,但沒有前面的問答）──';
+            holder.before(d);
+            refreshSessions();
+          }
+        }
         if (ev === 'error') { setMsgText(holder, '⚠ ' + data.error, 'assistant'); }
       }
     }
   } catch (e) { setMsgText(holder, '⚠ ' + e.message, 'assistant'); }
   sending = false;
   followBottom();
+  // 開了新的一段就要刷清單:多一個選項,而且「最新」換人了
+  if (newSession) refreshSessions();
 }
 
 document.getElementById('chatSend').onclick = () => sendChat();
@@ -318,6 +497,8 @@ document.getElementById('newChat').onclick = () => {
   chatlog.innerHTML = '';
   stick = true;
   nextNewSession = true;
+  curSession = null;         // 開新的一段,不再續任何舊 session
+  sessNote.textContent = '';
   const ta = document.getElementById('chatText');
   ta.placeholder = '新對話——第一則訊息會重新載入講義 context';
   ta.focus();
