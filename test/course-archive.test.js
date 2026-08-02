@@ -8,34 +8,43 @@ const test = require('node:test');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'learning-archive-'));
 process.env.COURSES_ROOT = root;
+process.env.LEARNING_DATA_ROOT = path.join(root, '.data');
 
 const content = require('../app/lib/content');
 const lifecycle = require('../app/lib/course-lifecycle');
 const search = require('../app/lib/archive-search');
+const store = require('../app/lib/db');
 
 function makeCourse(slug, status = 'active') {
-  const dir = path.join(root, slug);
-  fs.mkdirSync(path.join(dir, 'units'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({
-    title: '資料庫規模化', status, tags: ['資料庫'],
+  const dir = path.join(root, status === 'archived' ? 'archived' : 'active', slug);
+  const cdir = path.join(dir, 'content');
+  fs.mkdirSync(path.join(cdir, 'units'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'course.json'), JSON.stringify({ schema: 1, id: slug, slug }, null, 2) + '\n');
+  fs.writeFileSync(path.join(cdir, 'meta.json'), JSON.stringify({
+    title: '資料庫規模化', tags: ['資料庫'],
     concepts: [{ name: '索引', desc: '以資料結構縮小查詢範圍' }], relations: [],
   }, null, 2) + '\n');
-  fs.writeFileSync(path.join(dir, 'AGENDA.md'), '# 課綱\n\n從儲存引擎到索引與交易。\n');
-  fs.writeFileSync(path.join(dir, 'DIAGNOSTIC.md'), '只應存在於診斷檔的隱私詞\n');
-  fs.writeFileSync(path.join(dir, 'units', '01-index.md'), '# Unit 1:索引\n\nB-tree 索引讓查詢避免全表掃描。\n');
+  fs.writeFileSync(path.join(cdir, 'AGENDA.md'), '# 課綱\n\n從儲存引擎到索引與交易。\n');
+  fs.writeFileSync(path.join(cdir, 'DIAGNOSTIC.md'), '只應存在於診斷檔的隱私詞\n');
+  fs.writeFileSync(path.join(cdir, 'units', '01-index.md'), '# Unit 1:索引\n\nB-tree 索引讓查詢避免全表掃描。\n');
   return dir;
 }
 
-test('archive keeps course source, hides it from active, and restore is lossless', () => {
+test('archive atomically moves the whole bundle and restore is lossless', () => {
   const dir = makeCourse('db-scale');
-  const unitBefore = fs.readFileSync(path.join(dir, 'units', '01-index.md'), 'utf8');
+  const unitBefore = fs.readFileSync(path.join(dir, 'content', 'units', '01-index.md'), 'utf8');
+  store.setProgress('db-scale', '01-index.md', 'done');
 
   const archived = lifecycle.archive('db-scale');
+  const archivedDir = path.join(root, 'archived', 'db-scale');
   assert.equal(archived.status, 'archived');
   assert.equal(content.listCourses({ status: 'active' }).length, 0);
   assert.equal(content.listCourses({ status: 'archived' }).length, 1);
-  assert.equal(fs.readFileSync(path.join(dir, 'units', '01-index.md'), 'utf8'), unitBefore);
-  assert.ok(content.readMeta('db-scale').archivedAt);
+  assert.equal(fs.existsSync(dir), false);
+  assert.equal(fs.readFileSync(path.join(archivedDir, 'content', 'units', '01-index.md'), 'utf8'), unitBefore);
+  assert.ok(store.getStateMeta('db-scale', 'archived_at'));
+  assert.equal(store.getProgress('db-scale')[0].state, 'done');
   assert.throws(() => lifecycle.requireActive('db-scale'), e => e.code === 'course_archived');
 
   const found = search.search(content.listCourses({ status: 'archived' }), 'B-tree 查詢');
@@ -46,8 +55,9 @@ test('archive keeps course source, hides it from active, and restore is lossless
   const restored = lifecycle.restore('db-scale');
   assert.equal(restored.status, 'active');
   assert.equal(content.courseInfo('db-scale').status, 'active');
-  assert.equal(content.readMeta('db-scale').archivedAt, undefined);
-  assert.equal(fs.readFileSync(path.join(dir, 'units', '01-index.md'), 'utf8'), unitBefore);
+  assert.equal(store.getStateMeta('db-scale', 'archived_at'), null);
+  assert.equal(store.getProgress('db-scale')[0].state, 'done');
+  assert.equal(fs.readFileSync(path.join(dir, 'content', 'units', '01-index.md'), 'utf8'), unitBefore);
 });
 
 test('archive rejects a course with an in-flight mutation', () => {
@@ -58,4 +68,7 @@ test('archive rejects a course with an in-flight mutation', () => {
   assert.equal(lifecycle.archive('busy-course').status, 'archived');
 });
 
-test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+test.after(() => {
+  store.closeAll();
+  fs.rmSync(root, { recursive: true, force: true });
+});

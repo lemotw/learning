@@ -1,20 +1,18 @@
-// 課程內容掃描與解析 — courses/ 目錄唯讀,meta.json + units/*.md
+// Course bundle 內容掃描與解析。content/ 唯讀；state/ 由 db.js 管理。
 'use strict';
 
 const fs = require('node:fs');
 const path = require('node:path');
+const bundles = require('./course-bundles');
+const activityManifest = require('../../pipeline/lib/activity-manifest');
+const viewManifest = require('../../pipeline/lib/view-manifest');
 
-const COURSES_ROOT = process.env.COURSES_ROOT
-  || path.join(__dirname, '..', '..', 'courses');
-
-const SAFE_SEG = /^[\w][\w.-]*$/; // slug 與檔名白名單,擋路徑跳脫
+const COURSES_ROOT = bundles.ROOT;
+const SAFE_SEG = bundles.SAFE_SEG;
 const COURSE_STATUSES = new Set(['generating', 'active', 'archived']);
 
-function safeJoin(...segs) {
-  for (const s of segs) {
-    if (!SAFE_SEG.test(s)) throw Object.assign(new Error(`bad path segment: ${s}`), { status: 400 });
-  }
-  return path.join(COURSES_ROOT, ...segs);
+function safeJoin(slug, ...segs) {
+  return bundles.contentPath(slug, ...segs);
 }
 
 function metaPath(slug) {
@@ -22,20 +20,23 @@ function metaPath(slug) {
 }
 
 function readMeta(slug) {
-  const p = metaPath(slug);
-  if (!fs.existsSync(p)) return null;
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+  const b = bundles.locate(slug);
+  if (!b) return null;
+  try { return JSON.parse(fs.readFileSync(path.join(b.contentDir, 'meta.json'), 'utf8')); } catch { return null; }
 }
 
-// 早期 meta 可能沒有 status;向後相容地當作 active。未知 status 也不該讓課程憑空消失。
-function courseStatus(meta) {
+// Bundle layout 以所在目錄為 lifecycle 真相；legacy flat layout 才讀舊 meta.status。
+function courseStatus(meta, bundle = null) {
+  if (bundle) return bundle.status;
   return meta && COURSE_STATUSES.has(meta.status) ? meta.status : 'active';
 }
 
 function courseInfo(slug) {
+  const bundle = bundles.locate(slug);
+  if (!bundle) throw Object.assign(new Error('course not found'), { status: 404 });
   const meta = readMeta(slug);
-  if (!meta) throw Object.assign(new Error('course not found'), { status: 404 });
-  return { slug, meta, status: courseStatus(meta) };
+  if (!meta) throw Object.assign(new Error('course metadata malformed'), { status: 500 });
+  return { slug, id: bundle.id, meta, status: bundle.status, bundle, contentDir: bundle.contentDir };
 }
 
 function unitTitle(md) {
@@ -53,18 +54,15 @@ function listUnits(slug) {
 }
 
 function listCourses({ status } = {}) {
-  if (!fs.existsSync(COURSES_ROOT)) return [];
   const wanted = status ? new Set(Array.isArray(status) ? status : [status]) : null;
-  return fs.readdirSync(COURSES_ROOT)
-    .filter(d => !d.startsWith('.') && !d.startsWith('_'))
-    .map(slug => {
-      const meta = readMeta(slug);
-      if (!meta) return null;
-      const courseStatusValue = courseStatus(meta);
-      if (wanted && !wanted.has(courseStatusValue)) return null;
-      return { slug, meta, status: courseStatusValue, units: listUnits(slug) };
-    })
-    .filter(Boolean);
+  return bundles.list().filter(b => !wanted || wanted.has(b.status)).map(bundle => {
+    const meta = readMeta(bundle.slug);
+    if (!meta) return null;
+    return {
+      slug: bundle.slug, id: bundle.id, meta, status: bundle.status,
+      bundle, contentDir: bundle.contentDir, units: listUnits(bundle.slug),
+    };
+  }).filter(Boolean);
 }
 
 // 自答題約定:<!-- qN keywords: a, b, c --> 的下一個非空行是題目
@@ -87,7 +85,6 @@ function readUnit(slug, file) {
   if (!fs.existsSync(p)) throw Object.assign(new Error('unit not found'), { status: 404 });
   const raw = fs.readFileSync(p, 'utf8');
   const questions = parseQuestions(raw);
-  // 送前端的版本剝掉 keywords 註解(作答前不給看)
   const md = raw.replace(/<!--\s*q[\w-]*\s+keywords:[^>]*-->\s*\n/g, '');
   return { raw, md, questions };
 }
@@ -97,7 +94,74 @@ function readCourseFile(slug, name) {
   return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
 }
 
+function readActivities(slug) {
+  const { contentDir } = courseInfo(slug);
+  const data = activityManifest.loadManifest(contentDir, { optional: true });
+  if (!data) return [];
+  activityManifest.assertValid(data, { contentDir });
+  return activityManifest.normalizeManifest(data).activities;
+}
+
+function readViews(slug) {
+  const { contentDir } = courseInfo(slug);
+  const data = viewManifest.loadManifest(contentDir, { optional: true });
+  if (!data) return { schema: 1, views: [] };
+  viewManifest.assertValid(data, { contentDir });
+  return viewManifest.normalizeManifest(data);
+}
+
+function readView(slug, id) {
+  if (!viewManifest.ID_RE.test(id || '')) throw Object.assign(new Error('bad view id'), { status: 400 });
+  const view = readViews(slug).views.find(v => v.id === id);
+  if (!view) throw Object.assign(new Error('view not found'), { status: 404 });
+  return view;
+}
+
+function readViewEntry(slug, id) {
+  const info = courseInfo(slug), view = readView(slug, id);
+  return { view, file: path.join(info.contentDir, view.entry) };
+}
+
+function readViewData(slug, id) {
+  const info = courseInfo(slug), view = readView(slug, id);
+  if (!view.data) return null;
+  return JSON.parse(fs.readFileSync(path.join(info.contentDir, view.data), 'utf8'));
+}
+
+function contentFingerprint(slug) {
+  const { contentDir } = courseInfo(slug);
+  const files = [];
+  for (const name of ['meta.json', 'AGENDA.md', 'activities.json', 'views.json']) {
+    const p = path.join(contentDir, name); if (fs.existsSync(p)) files.push(p);
+  }
+  const units = path.join(contentDir, 'units');
+  if (fs.existsSync(units)) for (const name of fs.readdirSync(units).filter(x => x.endsWith('.md')).sort()) files.push(path.join(units, name));
+  const viewsDir = path.join(contentDir, 'views');
+  const walk = dir => {
+    if (!fs.existsSync(dir)) return;
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const file = path.join(dir, ent.name);
+      if (ent.isDirectory()) walk(file); else if (ent.isFile()) files.push(file);
+    }
+  };
+  walk(viewsDir);
+  try {
+    const manifest = viewManifest.loadManifest(contentDir, { optional: true });
+    for (const view of manifest?.views || []) {
+      if (!viewManifest.safeRelative(view.data, '.json')) continue;
+      const file = path.join(contentDir, view.data);
+      if (fs.existsSync(file) && !files.includes(file)) files.push(file);
+    }
+  } catch { /* malformed manifest 會由 verify/readViews 報錯 */ }
+  files.sort();
+  return files.map(file => {
+    const st = fs.statSync(file);
+    return `${path.relative(contentDir, file)}:${st.size}:${Math.floor(st.mtimeMs)}`;
+  }).join('|');
+}
+
 module.exports = {
   COURSES_ROOT, SAFE_SEG, COURSE_STATUSES, safeJoin, metaPath,
-  courseStatus, courseInfo, listCourses, readMeta, listUnits, readUnit, readCourseFile, parseQuestions,
+  courseStatus, courseInfo, listCourses, readMeta, listUnits, readUnit, readCourseFile,
+  parseQuestions, readActivities, readViews, readView, readViewEntry, readViewData, contentFingerprint,
 };

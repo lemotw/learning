@@ -26,7 +26,7 @@ function fileState(file) {
 }
 
 function fingerprint(course) {
-  const dir = path.join(content.COURSES_ROOT, course.slug);
+  const dir = course.contentDir || content.courseInfo(course.slug).contentDir;
   const files = [path.join(dir, 'meta.json'), path.join(dir, 'AGENDA.md')];
   const units = path.join(dir, 'units');
   try {
@@ -45,7 +45,7 @@ function readSmall(file) {
 }
 
 function buildCourse(course, fp) {
-  const dir = path.join(content.COURSES_ROOT, course.slug);
+  const dir = course.contentDir || content.courseInfo(course.slug).contentDir;
   const docs = [];
   const metaText = [course.meta.title || course.slug, ...(course.meta.tags || []),
     ...(course.meta.concepts || []).flatMap(c => [c && c.name, c && c.desc])]

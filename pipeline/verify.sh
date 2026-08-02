@@ -3,7 +3,15 @@
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SLUG="${1:?usage: verify.sh <course-slug>}"
-DIR="$ROOT/courses/$SLUG"
+if [ -n "${COURSE_CONTENT_DIR:-}" ]; then
+  DIR="$COURSE_CONTENT_DIR"
+else
+  DIR="$(COURSES_ROOT="${COURSES_ROOT:-$ROOT/courses}" node -e '
+  const b = require(process.argv[1]).locate(process.argv[2]);
+  if (!b) process.exit(2);
+  process.stdout.write(b.contentDir);
+  ' "$ROOT/app/lib/course-bundles.js" "$SLUG")" || { echo "✗ 找不到課程 $SLUG"; exit 1; }
+fi
 FAIL=0
 
 err() { echo "✗ $1"; FAIL=1; }
@@ -32,8 +40,33 @@ for f in "${UNITS[@]}"; do
   grep -q '^!!!' "$f" && err "$name 用了 mkdocs admonition 語法(reader 不支援)"
 done
 
+# Activity / View capability 都是 optional；存在就必須通過契約與 reference 驗證。
+if [ -f "$DIR/activities.json" ]; then
+  node "$ROOT/pipeline/activity-tool.js" validate "$DIR" || FAIL=1
+fi
+if [ -f "$DIR/views.json" ]; then
+  COURSE_CONTENT_DIR="$DIR" ROOT_DIR="$ROOT" node <<'NODE' || FAIL=1
+const fs = require('fs'), path = require('path');
+const V = require(path.join(process.env.ROOT_DIR, 'pipeline/lib/view-manifest'));
+const dir = process.env.COURSE_CONTENT_DIR;
+try {
+  const manifest = V.loadManifest(dir);
+  V.assertValid(manifest, { contentDir: dir });
+  const ids = new Set(manifest.views.map(v => v.id));
+  for (const file of fs.readdirSync(path.join(dir, 'units')).filter(x => x.endsWith('.md'))) {
+    const md = fs.readFileSync(path.join(dir, 'units', file), 'utf8');
+    for (const match of md.matchAll(/```view\s*\n([\s\S]*?)```/g)) {
+      const { id } = V.parseDirective(match[1]);
+      if (!ids.has(id)) throw new Error(`${file}: view directive 找不到 views.json 的 ${id}`);
+    }
+  }
+  console.log(`OK ${path.join(dir, 'views.json')}: ${manifest.views.length} views`);
+} catch (e) { console.error('✗ ' + e.message); process.exit(1); }
+NODE
+fi
+
 # 用 server 同一套解析器驗證每題都解得出來
-node -e '
+COURSES_ROOT="${COURSES_ROOT:-$ROOT/courses}" node -e '
 const c = require("'"$ROOT"'/app/lib/content.js");
 const fs = require("fs"), path = require("path");
 const dir = "'"$DIR"'/units";

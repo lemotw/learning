@@ -1,5 +1,5 @@
 // learning hub — 講義閱讀 + 學習狀態(SQLite)+ 講義側欄 AI 助教(claude CLI headless)
-// 零依賴 Node。courses/ 一般唯讀；course-lifecycle 是唯一可原子改 meta.status 的受控例外。
+// 零依賴 Node。每課 content/ 唯讀、state/ 自有；course-lifecycle 以 bundle atomic rename 封存。
 'use strict';
 
 const http = require('node:http');
@@ -11,6 +11,7 @@ const { URL } = require('node:url');
 const store = require('./lib/db');
 const content = require('./lib/content');
 const lifecycle = require('./lib/course-lifecycle');
+const globalIndex = require('./lib/global-index');
 const archiveSearch = require('./lib/archive-search');
 const chat = require('./lib/chat');
 const agents = require('./lib/agents');
@@ -61,30 +62,34 @@ function progressMap(course) {
   return map;
 }
 
-function coursesWithProgress(status = 'active') {
-  return content.listCourses({ status }).map(({ slug, meta, units, status: courseStatus }) => {
-    const pm = progressMap(slug);
-    const u = units.map(x => ({
-      ...x,
-      state: pm[x.file] ? pm[x.file].state : 'unread',
-      updatedAt: pm[x.file] ? pm[x.file].updated_at : null,
-    }));
-    return {
-      slug,
-      title: meta.title || slug,
-      status: courseStatus,
-      archivedAt: meta.archivedAt || null,
-      tags: meta.tags || [],
-      relations: meta.relations || [],
-      units: u,
-      done: u.filter(x => x.state === 'done').length,
-      total: u.length,
-    };
-  });
+function courseActivities(course) {
+  const info = content.courseInfo(course);
+  const progress = Object.fromEntries(store.getActivityProgress(course).map(p => [p.activity_id, p]));
+  return {
+    schema: 1,
+    course,
+    revision: store.getRevision(course),
+    writable: info.status === 'active',
+    activities: content.readActivities(course).map(activity => ({
+      ...activity,
+      state: progress[activity.id]?.state || 'todo',
+      updatedAt: progress[activity.id]?.updated_at || null,
+    })),
+  };
 }
 
-function activeCourseSlugs() {
-  return new Set(content.listCourses({ status: 'active' }).map(c => c.slug));
+function setActivityState(course, activityId, state) {
+  lifecycle.requireActive(course);
+  const activity = content.readActivities(course).find(a => a.id === activityId);
+  if (!activity) throw Object.assign(new Error('activity not found'), { status: 404 });
+  const progress = store.setActivityProgress(course, activityId, state);
+  store.addRecord(course, activity.unit, 'activity', `${activityId}: state → ${state}`);
+  globalIndex.reindexCourse(course);
+  return { ...activity, state, updatedAt: progress.updatedAt };
+}
+
+function coursesWithProgress(status = 'active') {
+  return globalIndex.listCourses(status);
 }
 
 // 關聯圖是可重建衍生資料。封存／還原成功後盡力重跑，不讓 Ollama 不可用阻擋 lifecycle。
@@ -113,6 +118,7 @@ function routeCourseLifecycle(req, res, url) {
   let slug;
   try { slug = decodeURIComponent(m[1]); } catch { throw Object.assign(new Error('bad course slug'), { status: 400 }); }
   const out = m[2] === 'archive' ? lifecycle.archive(slug) : lifecycle.restore(slug);
+  globalIndex.reindexCourse(slug);
   scheduleRelations();
   json(res, 200, { ok: true, course: out });
   return true;
@@ -159,11 +165,29 @@ async function handleApi(req, res, url) {
 
   if (routeCourseLifecycle(req, res, url)) return;
 
+  // Canonical course-local Activity API。View plugin 不讀 eventual-consistent global index。
+  const activityRoute = url.pathname.match(/^\/api\/v1\/courses\/([^/]+)\/activities(?:\/([^/]+))?$/);
+  if (activityRoute) {
+    let course, activityId;
+    try {
+      course = decodeURIComponent(activityRoute[1]);
+      activityId = activityRoute[2] ? decodeURIComponent(activityRoute[2]) : null;
+    } catch { throw Object.assign(new Error('bad activity path'), { status: 400 }); }
+    if (req.method === 'GET' && !activityId) return json(res, 200, courseActivities(course));
+    if (req.method === 'PATCH' && activityId) {
+      const { state } = await readBody(req);
+      return json(res, 200, { ok: true, activity: setActivityState(course, activityId, state) });
+    }
+    return json(res, 405, { error: 'method not allowed' });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/courses') {
+    globalIndex.scheduleCheck('homepage', { full: globalIndex.shouldFullCheck() }).catch(console.error);
     return json(res, 200, coursesWithProgress('active'));
   }
 
   if (req.method === 'GET' && url.pathname === '/api/archive') {
+    globalIndex.scheduleCheck('homepage').catch(console.error);
     return json(res, 200, coursesWithProgress('archived'));
   }
 
@@ -215,17 +239,54 @@ async function handleApi(req, res, url) {
     const course = q.get('course'), unit = q.get('unit');
     const { meta, status: courseStatus } = content.courseInfo(course);
     const { md, questions } = content.readUnit(course, unit);
+    const viewManifest = content.readViews(course);
     const units = content.listUnits(course);
     const pm = progressMap(course);
+    const activityProgress = Object.fromEntries(store.getActivityProgress(course).map(p => [p.activity_id, p]));
+    const activities = content.readActivities(course).filter(a => a.unit === unit).map(a => ({
+      ...a, state: activityProgress[a.id]?.state || 'todo',
+      updatedAt: activityProgress[a.id]?.updated_at || null,
+    }));
     return json(res, 200, {
       course, unit, md,
       courseTitle: meta.title || course,
+      courseNavTitle: meta.shortTitle || meta.title || course,
       courseStatus,
-      archivedAt: meta.archivedAt || null,
+      archivedAt: store.getStateMeta(course, 'archived_at'),
       questions: questions.map(({ id, question }) => ({ id, question })), // keywords 不外流
+      activities,
+      courseDrawer: viewManifest.courseDrawer || null,
+      views: viewManifest.views.map(({ id, title, height }) => ({ id, title, height: height || 720 })),
       units: units.map(u => ({ ...u, state: pm[u.file] ? pm[u.file].state : 'unread' })),
       state: pm[unit] ? pm[unit].state : 'unread',
     });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/activities') {
+    const course = q.get('course'), unit = q.get('unit');
+    if (course) content.courseInfo(course);
+    return json(res, 200, globalIndex.listActivities({ course, unit,
+      status: q.get('state'), kind: q.get('kind'), role: q.get('role') }));
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/activity/catalog') {
+    return json(res, 200, globalIndex.resourceCatalog({ includeArchived: q.get('activeOnly') !== '1' }));
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/view-data') {
+    const course = q.get('course'), view = q.get('view');
+    const definition = content.readView(course, view);
+    return json(res, 200, { schema: 1, view: { id: definition.id, title: definition.title }, data: content.readViewData(course, view) });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/activity/progress') {
+    const { course, activityId, state } = await readBody(req);
+    setActivityState(course, activityId, state);
+    return json(res, 200, { ok: true, state });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/index/status') {
+    return json(res, 200, globalIndex.status());
   }
 
   if (req.method === 'POST' && url.pathname === '/api/progress') {
@@ -235,12 +296,12 @@ async function handleApi(req, res, url) {
     content.readUnit(course, unit); // 驗證存在 + 路徑安全
     store.setProgress(course, unit, state);
     store.addRecord(course, unit, 'read', `state → ${state}`);
+    globalIndex.reindexCourse(course);
     return json(res, 200, { ok: true });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/records') {
-    const active = activeCourseSlugs();
-    return json(res, 200, store.recentRecords(Number(q.get('limit') || 20)).filter(r => active.has(r.course)));
+    return json(res, 200, globalIndex.recentRecords(Number(q.get('limit') || 20), 'active'));
   }
 
   if (req.method === 'POST' && url.pathname === '/api/records') {
@@ -248,12 +309,12 @@ async function handleApi(req, res, url) {
     if (!course || !kind) return json(res, 400, { error: 'course/kind required' });
     lifecycle.requireActive(course);
     store.addRecord(course, unit || null, kind, note);
+    globalIndex.reindexCourse(course);
     return json(res, 200, { ok: true });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/redo') {
-    const active = activeCourseSlugs();
-    return json(res, 200, store.redoQueue().filter(r => active.has(r.course)));
+    return json(res, 200, globalIndex.redoQueue('active'));
   }
 
   if (req.method === 'GET' && url.pathname === '/api/selfcheck') {
@@ -282,6 +343,7 @@ async function handleApi(req, res, url) {
       const verdict = graded.verdict === 'pass' ? 'pass' : 'redo';
       store.addAttempt(course, unit, qid, answer, verdict, graded.feedback || '');
       store.addRecord(course, unit, 'selfcheck', `${qid}: ${verdict}`);
+      globalIndex.reindexCourse(course);
       return json(res, 200, {
         verdict,
         missing: graded.missing || [],
@@ -364,12 +426,31 @@ async function handleApi(req, res, url) {
     } catch (e) {
       send('error', { error: String(e.message || e) });
     } finally {
+      try { globalIndex.reindexCourse(course); } catch (e) { console.error('chat index update failed', e); }
       release();
     }
     return res.end();
   }
 
   json(res, 404, { error: 'not found' });
+}
+
+function serveCourseView(req, res, url) {
+  const match = url.pathname.match(/^\/course-view\/([^/]+)\/([^/]+)\.html$/);
+  if (!match || req.method !== 'GET') return false;
+  let course, viewId;
+  try { course = decodeURIComponent(match[1]); viewId = decodeURIComponent(match[2]); }
+  catch { throw Object.assign(new Error('bad view path'), { status: 400 }); }
+  const { file } = content.readViewEntry(course, viewId);
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    // iframe 沒有 same-origin 權限，也禁止自行連網；資料與 mutation 只能走 parent bridge。
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",
+    'X-Content-Type-Options': 'nosniff',
+  });
+  fs.createReadStream(file).pipe(res);
+  return true;
 }
 
 function serveStatic(req, res, url) {
@@ -387,11 +468,14 @@ function serveStatic(req, res, url) {
   fs.createReadStream(file).pipe(res);
 }
 
+const startupIndex = globalIndex.reconcile({ full: globalIndex.shouldFullCheck() });
+if (startupIndex.errors.length) console.error('global index startup errors', startupIndex.errors);
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   try {
     if (url.pathname.startsWith('/api/')) await handleApi(req, res, url);
-    else serveStatic(req, res, url);
+    else if (!serveCourseView(req, res, url)) serveStatic(req, res, url);
   } catch (e) {
     const code = e.status || 500;
     if (!res.headersSent) json(res, code, { error: String(e.message || e) });
@@ -403,3 +487,14 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`learning hub on http://${HOST}:${PORT}  (courses: ${content.COURSES_ROOT})`);
 });
+
+function shutdown() {
+  server.close(() => {
+    store.closeAll();
+    try { globalIndex.db.close(); } catch {}
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), 4000).unref();
+}
+process.once('SIGTERM', shutdown);
+process.once('SIGINT', shutdown);

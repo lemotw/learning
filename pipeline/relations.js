@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 課程關聯自動計算(IE 路線正式版)— 純本機、零 LLM:
-//   讀 active courses/*/meta.json 的 concepts({name, desc},生成期由 LLM 萃取)
+//   讀 courses/active/*/content/meta.json 的 concepts({name, desc},生成期由 LLM 萃取)
 //   → Ollama bge-m3 embed(內容 hash 快取)→ centering → 雙向 MaxSim
 //   → 空隙偵測選候選邊 → 輸出 app/data/graph-auto.json(server 合併進 /api/graph)
 // 手動邊(meta.json relations)為權威,已有手動邊的配對不出自動邊。
@@ -12,7 +12,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ROOT = path.join(__dirname, '..');
-const COURSES = process.env.COURSES_ROOT || path.join(ROOT, 'courses');
+const bundles = require(path.join(ROOT, 'app', 'lib', 'course-bundles'));
 const DATA = path.join(ROOT, 'app', 'data');
 const CACHE_FILE = path.join(DATA, 'embed-cache.json');
 const OUT_FILE = path.join(DATA, 'graph-auto.json');
@@ -44,13 +44,11 @@ async function embedBatch(texts) {
     process.exit(0);
   }
 
-  const allSlugs = fs.readdirSync(COURSES).filter(d => !d.startsWith('.') && !d.startsWith('_')
-    && fs.existsSync(path.join(COURSES, d, 'meta.json')));
-  const allMetas = Object.fromEntries(allSlugs.map(s =>
-    [s, JSON.parse(fs.readFileSync(path.join(COURSES, s, 'meta.json'), 'utf8'))]));
-  // 封存課的 source 仍留在磁碟且可搜尋，但不參與日常 active graph。
-  const slugs = allSlugs.filter(s => (allMetas[s].status || 'active') === 'active');
-  const metas = Object.fromEntries(slugs.map(s => [s, allMetas[s]]));
+  // Bundle 所在目錄就是 lifecycle 真相；只有 active/ 參與日常 graph。
+  const activeBundles = bundles.list({ status: 'active' });
+  const slugs = activeBundles.map(b => b.slug);
+  const metas = Object.fromEntries(activeBundles.map(b =>
+    [b.slug, JSON.parse(fs.readFileSync(path.join(b.contentDir, 'meta.json'), 'utf8'))]));
 
   // 已有手動邊的配對(雙向皆算)
   const manual = new Set();

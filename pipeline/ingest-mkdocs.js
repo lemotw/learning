@@ -13,7 +13,9 @@ const DRY = process.argv.includes('--dry');
 if (!srcDir || !slug) { console.error('usage: ingest-mkdocs.js <srcDir> <slug> [--dry]'); process.exit(1); }
 
 const ROOT = path.join(__dirname, '..');
-const OUT = path.join(ROOT, 'courses', slug);
+const COURSES = process.env.COURSES_ROOT || path.join(ROOT, 'courses');
+const OUT = path.join(COURSES, 'staging', slug);
+const CONTENT = path.join(OUT, 'content');
 
 // ---------- admonition → blockquote ----------
 const EMOJI = { tip: '💡', warning: '⚠️', danger: '🔥', note: '📝', info: 'ℹ️', example: '🧪', question: '❓' };
@@ -120,7 +122,7 @@ for (const f of unitFiles) {
 const title = (indexMd.match(/^# (.+)$/m) || [, slug])[1].trim();
 const created = fs.statSync(path.join(src, 'docs', 'index.md')).mtime.toISOString().slice(0, 10);
 outputs['meta.json'] = JSON.stringify({
-  title, status: 'active', created, tags: [], concepts: [], relations: [],
+  title, created, tags: [], concepts: [], relations: [],
   migratedFrom: src,
 }, null, 2) + '\n';
 
@@ -135,12 +137,18 @@ outputs['AGENDA.md'] = `# 課綱:${title}\n\n` + (agendaParts.join('\n\n') || in
 if (DRY) {
   console.log(Object.keys(outputs).join('\n'));
 } else {
-  fs.mkdirSync(path.join(OUT, 'units'), { recursive: true });
-  for (const [rel, content] of Object.entries(outputs)) {
-    fs.writeFileSync(path.join(OUT, rel), content);
+  if (fs.existsSync(OUT)) throw new Error(`staging bundle already exists: ${OUT}`);
+  fs.mkdirSync(path.join(CONTENT, 'units'), { recursive: true });
+  fs.mkdirSync(path.join(OUT, 'state'), { recursive: true });
+  fs.writeFileSync(path.join(OUT, 'course.json'), JSON.stringify({
+    schema: 1, id: slug, slug, createdAt: created,
+  }, null, 2) + '\n');
+  for (const [rel, body] of Object.entries(outputs)) {
+    fs.writeFileSync(path.join(CONTENT, rel), body);
   }
+  fs.writeFileSync(path.join(CONTENT, 'activities.json'), JSON.stringify({ schema: 1, activities: [] }, null, 2) + '\n');
   const srcLabs = path.join(src, 'labs');
-  if (fs.existsSync(srcLabs)) fs.cpSync(srcLabs, path.join(OUT, 'labs'), { recursive: true });
+  if (fs.existsSync(srcLabs)) fs.cpSync(srcLabs, path.join(CONTENT, 'labs'), { recursive: true });
 }
 
 console.log(`${slug}: ${unitFiles.length} units, 題庫 ${Object.keys(bank).length} 題`);
