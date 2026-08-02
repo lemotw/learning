@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://learning.local/schemas/views.schema.json",
+  "title": "Course activity views",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "views"],
+  "properties": {
+    "schema": { "const": 1 },
+    "courseDrawer": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+    "views": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "entry"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+          "title": { "type": "string", "minLength": 1 },
+          "entry": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*\\.html$" },
+          "data": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*\\.json$" },
+          "height": { "type": "integer", "minimum": 240, "maximum": 1600 }
+        }
+      }
+    }
+  }
+}
