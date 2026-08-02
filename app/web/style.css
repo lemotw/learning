@@ -110,6 +110,12 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .reading-block-marker:focus-visible { border-color: var(--accent); outline: none; }
 .reading-block.is-reading > .reading-block-marker { color: var(--warn); }
 .reading-block.is-done > .reading-block-marker { color: var(--ok); }
+/* iPhone 的第二下觸碰會落在 Safari 原生 switch，藉此取得真正的 Taptic 回饋。 */
+.reading-ios-haptic {
+  position: fixed; z-index: 60; width: 64px; height: 64px; margin: 0;
+  opacity: 0; clip-path: inset(0 round 999px); cursor: pointer;
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
 @media (prefers-reduced-motion: reduce) { .reading-block { transition: none; } }
 
 /* Unit activity checklist */

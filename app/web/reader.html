@@ -246,10 +246,40 @@ function installReadingFeedback(root) {
   const interactive = 'a, button, input, select, textarea, pre, code, table, img, svg, .mermaid, .course-view-shell';
   function blockAt(target) {
     if (!(target instanceof Element)) return null;
+    const nativeHaptic = target.closest('.reading-ios-haptic');
+    if (nativeHaptic) return nativeHaptic.closest('.reading-block');
     const marker = target.closest('.reading-block-marker');
     if (marker) return marker.closest('.reading-block');
     if (target.closest(interactive)) return null;
     return target.closest('.reading-block');
+  }
+
+  // iOS 沒有 Vibration API。Safari 17.4 起，使用者親自切換原生 switch control
+  // 會產生 Taptic 回饋；第一下點擊後短暫把透明 switch 放到觸點，讓第二下是原生操作。
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  let iosHaptic = null;
+  let iosHapticTimer = null;
+  function clearIOSHaptic() {
+    clearTimeout(iosHapticTimer);
+    iosHaptic?.remove();
+    iosHaptic = null;
+  }
+  function armIOSHaptic(block, clientX, clientY) {
+    if (!isIOS) return;
+    clearIOSHaptic();
+    const size = 64;
+    const control = document.createElement('input');
+    control.type = 'checkbox';
+    control.setAttribute('switch', '');
+    control.setAttribute('aria-hidden', 'true');
+    control.tabIndex = -1;
+    control.className = 'reading-ios-haptic';
+    control.style.left = `${Math.max(0, Math.min(innerWidth - size, clientX - size / 2))}px`;
+    control.style.top = `${Math.max(0, Math.min(innerHeight - size, clientY - size / 2))}px`;
+    block.prepend(control);
+    iosHaptic = control;
+    iosHapticTimer = setTimeout(clearIOSHaptic, 480);
   }
 
   let touchStart = null;
@@ -275,16 +305,21 @@ function installReadingFeedback(root) {
     }
     if (previousTap && previousTap.block === start.block && now - previousTap.at < 400
       && Math.hypot(event.clientX - previousTap.x, event.clientY - previousTap.y) < 30) {
-      event.preventDefault();
+      const usedNativeHaptic = event.target instanceof Element
+        && event.target.matches('.reading-ios-haptic');
+      // iPhone 的原生 switch 必須完成真實的預設 click 才會震動，不能 preventDefault。
+      if (!usedNativeHaptic) event.preventDefault();
       advanceReadingBlock(start.block);
       previousTap = null;
       suppressDoubleClickUntil = performance.now() + 700;
+      setTimeout(clearIOSHaptic, 80);
     } else {
       previousTap = { block: start.block, x: event.clientX, y: event.clientY, at: now };
+      armIOSHaptic(start.block, event.clientX, event.clientY);
     }
   }, { passive: false });
 
-  root.addEventListener('pointercancel', () => { touchStart = null; });
+  root.addEventListener('pointercancel', () => { touchStart = null; clearIOSHaptic(); });
 
   root.addEventListener('dblclick', event => {
     if (performance.now() < suppressDoubleClickUntil) { event.preventDefault(); return; }
