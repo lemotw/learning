@@ -8,7 +8,7 @@
  */
 'use strict';
 
-const CACHE_VERSION = 'v6';
+const CACHE_VERSION = 'v7';
 const STATIC_CACHE = 'learning-static-' + CACHE_VERSION;
 const CONTENT_CACHE = 'learning-content';
 
