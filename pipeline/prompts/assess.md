@@ -15,7 +15,7 @@
 
 ## 課程關聯提議
 
-- 讀 `courses/*/meta.json`(現存所有課程),提議新課與舊課的關聯:
+- 讀 `courses/active/*/content/meta.json`(現存進行中課程),提議新課與舊課的關聯:
     - `prereq`:建議先學完對方
     - `related`:概念相通、可互相印證
     - `extends`:是對方某單元的深入
@@ -25,6 +25,7 @@
 
 1. 把「程度分析 + agenda + 關聯提議」給使用者看,**等回饋修改**。
 2. 確認後固化三個檔案:
-    - `courses/<slug>/DIAGNOSTIC.md`:題目、使用者原答、三桶分析(永久保留)
-    - `courses/<slug>/AGENDA.md`:定稿課綱
-    - `courses/<slug>/meta.json`:照 `pipeline/templates/meta.json.tmpl`
+    - `courses/staging/<slug>/content/DIAGNOSTIC.md`:題目、使用者原答、三桶分析(永久保留)
+    - `courses/staging/<slug>/content/AGENDA.md`:定稿課綱
+    - `courses/staging/<slug>/content/meta.json`:照 `pipeline/templates/meta.json.tmpl`
+    - `courses/staging/<slug>/content/activities.json`:照 `pipeline/templates/activities.json.tmpl`，任務由 unit writers 寫 fragment 後合併

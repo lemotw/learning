@@ -8,33 +8,32 @@
 
 ## 系統架構
 
-三層分離,職責單向流動:
+每門課是可獨立搬移的 course bundle；內容與狀態同 bundle、不同 ownership：
 
 ```
-┌─ 生成層 pipeline/ ──────────────────────────────────────────┐
-│ prompts/(診斷、程度分析、單元撰寫、概念萃取規格)             │
-│ templates/(meta.json / AGENDA / 單元骨架)                   │
-│ verify.sh(機械驗收) relations.js(關聯計算)                │
-└──────────────┬──────────────────────────────────────────────┘
-               │ 生成(LLM 在場的 session)
-               ▼
-┌─ 內容層 courses/<slug>/(唯讀、gitignored)──────────────────┐
-│ meta.json(標題/狀態/concepts/relations/archivedAt)         │
-│ DIAGNOSTIC.md(診斷問答,永久留檔)  AGENDA.md(課綱)       │
-│ units/*.md(講義)  labs/(實驗檔)                          │
-└──────────────┬──────────────────────────────────────────────┘
-               │ 讀取
-               ▼
-┌─ 應用層 app/ ───────────────────────────────────────────────┐
-│ server.js(零依賴 Node)+ lib/(db / content / chat)        │
-│ web/(index 課程列表+圖譜、reader 閱讀器)                   │
-│ data/(唯一可寫:SQLite 狀態、embed 快取、graph-auto.json)  │
-└─────────────────────────────────────────────────────────────┘
+courses/
+├─ active/<slug>/
+│  ├─ course.json                 # 穩定 bundle identity
+│  ├─ content/                    # 唯讀、可由 generator 重建
+│  │  ├─ meta.json / DIAGNOSTIC.md / AGENDA.md
+│  │  ├─ units/ / labs/
+│  │  └─ activities.json         # 任務定義,不含 todo state
+│  └─ state/state.sqlite         # 該課 progress/attempt/chat 的唯一真相
+├─ archived/<slug>/              # 整個 bundle 封存後所在位置
+└─ staging/<slug>/               # 生成與驗收中的 content
+
+app/data/
+├─ global-index.sqlite           # 跨課 projection,可由 bundles 重建
+├─ graph-auto.json               # 關聯衍生資料
+└─ embed-cache.json              # embedding 快取
 ```
 
-設計原則:**內容層對一般 app 流程永遠唯讀;一切學習狀態集中在 `app/data/`**。唯一例外是
-`app/lib/course-lifecycle.js`:它是受控邊界,只能原子更新 `meta.json` 的封存狀態,不搬移、不刪除任何課程檔。課程 md 是唯一真相,
-資料庫壞了只丟學習記錄不丟內容。
+設計原則：
+
+- `content/` 對 app 永遠唯讀；生成器只能在 staging 產生並原子替換 content，不能碰 state。
+- `state/state.sqlite` 是該課學習狀態的唯一真相；一門課壞掉不拖累其他課。
+- active／archived 由 bundle 位於哪個目錄決定，不在 meta 重複保存 lifecycle state。
+- `global-index.sqlite` 只服務首頁、跨課練習與待回爐查詢；刪掉後可掃 course bundles 重建。
 
 ## 課程生成流程(`/new-course`,skill 驅動)
 
@@ -43,10 +42,10 @@
 2 診斷出題(6-8 題開放式 + 背景題;難度梯度:基礎→進階→超綱)── 必停:等作答
 3 程度分析:答案分 ✅已有/❌誤解/⬜空白 三桶(引用原話)→ 提議課綱
    (單元數 = 洞聚類結果 6-12 + 整合單元,不硬湊固定數)
-4 課綱確認 ── 必停:等回饋 → 固化 DIAGNOSTIC.md / AGENDA.md / meta.json
+4 課綱確認 ── 必停:等回饋 → course-tool 建 staging bundle,固化 content
    此刻同步做概念萃取(見下)寫入 meta.json concepts
-5 平行派 agent 生成單元講義(每 agent 3-4 個單元)
-6 verify.sh 機械驗收(行數/必含區段/keywords 可解析)→ 跑 relations.js 更新關聯
+5 平行派 agent 生成 units + 各自的 activity fragments
+6 activity-tool merge/validate → verify.sh → course-tool activate → relations.js
 7 DIAGNOSTIC.md 永久留檔(助教與批改的個人化依據)
 ```
 
@@ -69,16 +68,29 @@
 
 驗收豁免標記:`<!-- verify: skip=lines,lab -->`(整合/附錄類特例)。
 
-## 學習狀態(SQLite,`node:sqlite` 零依賴)
+## 學習狀態與 Activity
+
+每門課的 `state/state.sqlite` 包含：
 
 | 表 | 內容 |
 |---|---|
 | `progress` | 每單元 unread/reading/done + 時間 |
-| `records` | append-only 學習流水帳(read/selfcheck/chat/lab) |
-| `selfcheck_attempts` | 自答題歷次作答:答案、verdict(pass/redo)、AI 評語 |
-| `chat_sessions` / `chat_messages` | 助教對話 session 對應與全文 |
+| `activity_progress` | 通用任務 todo/doing/done；唯一 Activity 狀態軸 |
+| `records` | append-only 學習流水帳 |
+| `selfcheck_attempts` | 自答題歷次答案、verdict、AI 評語 |
+| `chat_sessions` / `chat_messages` | 助教對話 session 與 transcript |
 
-回爐佇列 = 每題最新一次作答為 redo 的集合(一句 SQL)。
+`content/activities.json` 只回答「課程安排了什麼」；SQLite 對 Activity 只記 `todo → doing → done`。Activity 可表示 exercise、Lab、reading、drill、project。course-local `id` 表示 assignment，`resource`（如 `leetcode:two-sum`）供跨課聚合。
+
+`global-index.sqlite` 保存每課 revision 與 content fingerprint。App 寫入後立即更新 projection；首頁最多每五分鐘背景 reconcile，一天做一次 full integrity check，server 啟動檢查只是安全網。
+
+### Course-local View plugin
+
+View 由 `content/views.json` 宣告，entry HTML 放在 `content/views/`。設定 `courseDrawer` 的課程會在 Reader header 顯示「課程導覽」，按下後由左側開啟同一個 course-local View；助教則由右側開啟，兩者一次只開一個。Markdown 不需要重複掛載。
+
+需要在講義特定位置呈現其他 View 時，仍可用 ```` ```view ```` fenced directive 明確掛載其 id。Reader 一律以只有 `allow-scripts` 的 sandbox iframe 載入；iframe 被 CSP 禁止連網，不能直接操作 Learning Hub API，只能透過 version 1 `postMessage` bridge 取得 Activity snapshot 或請求三態更新。沒有 View 的課程繼續使用標準 Activity 列表。
+
+Canonical API 為 `GET /api/v1/courses/<slug>/activities` 與 `PATCH /api/v1/courses/<slug>/activities/<id>`；它直接 join course-local manifest 與 SQLite，不經 global index。NeetCode 的 `neetcode-dag` View 使用 18 個主題、21 條邊及原圖座標，題目本身只歸屬主題，不捏造題目間 prerequisite。
 
 ## AI 助教(reader 右側欄)
 
@@ -129,9 +141,13 @@
 
 ## 課程封存與來源搜尋
 
-封存是 `meta.json` 的狀態轉移，不是刪除：`active → archived → active`。
+封存是同一 filesystem 上整個 bundle 的 atomic rename：
 
-- **保留一切資料**：`courses/<slug>/` 原路徑不動，講義／課綱／labs／DIAGNOSTIC，以及 SQLite 的進度、自答與助教歷程均不刪除。
+```text
+courses/active/<slug> ↔ courses/archived/<slug>
+```
+
+- **保留一切資料**：content、state、進度、Activity 狀態、自答與聊天 transcript 一起移動，沒有資料複製或刪除。
 - **工作面隔離**：首頁、總進度、待回爐、預設知識圖譜只出 active 課；封存課在首頁「封存」tab 瀏覽。
 - **唯讀回看**：封存講義仍能閱讀、看歷史自答與助教對話；progress、批改與新助教訊息由前後端共同停用。還原後直接接續原進度。
 - **來源搜尋**：封存 tab 可搜尋課名、tags、concepts、`AGENDA.md` 和 `units/*.md`。搜尋是依檔案 mtime/size 增量建立的記憶體 snapshot，source 仍是唯一真相；初版刻意不索引 DIAGNOSTIC、SQLite 歷程與 labs。
@@ -156,8 +172,12 @@
 ## 常用指令
 
 ```bash
-node app/server.js               # 起 hub(http://127.0.0.1:4600)
-./pipeline/verify.sh <slug>      # 驗收一門課
-node pipeline/relations.js       # 重算課程關聯(需本機 Ollama + bge-m3)
-node pipeline/ingest-mkdocs.js <srcDir> <slug>   # 匯入舊 mkdocs 課程
+node app/server.js                              # 起 hub(http://127.0.0.1:4600)
+node pipeline/course-tool.js init <slug>         # 建 staging bundle
+node pipeline/activity-tool.js validate <dir>   # 驗證 activities.json
+./pipeline/verify.sh <slug>                      # 驗收一門課
+node pipeline/course-tool.js activate <slug>     # staging → active
+node pipeline/course-tool.js update-content <slug> # 只換 content,保留 state
+node pipeline/relations.js                       # 重算 active 課程關聯
+node pipeline/ingest-mkdocs.js <srcDir> <slug>   # 匯入到 staging bundle
 ```

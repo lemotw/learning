@@ -12,10 +12,10 @@ description: 在本專案建立一門個人化課程(診斷 → 程度分析+課
 
 1. **使用者說要學什麼**(指令參數/對話)。
 2. **診斷出題**:依 `pipeline/prompts/diagnostic.md` 出 6-8 題 + 1-2 題背景題,**停下來等作答**。難度不能都太貼合已知、也不能離太遠。
-3. **程度分析**:依 `pipeline/prompts/assess.md` 分 ✅/❌/⬜ 三桶(引用原話),提議 agenda(單元數 = 洞聚類結果 6-12 + 整合單元)與課程關聯(讀 `courses/*/meta.json` 提議 relations)。
-4. **給使用者看,等回饋修改**。確認後固化:`courses/<slug>/DIAGNOSTIC.md`、`AGENDA.md`、`meta.json`(照 `pipeline/templates/`;slug 用英文 kebab-case),並建 `units/` 佔位檔(只有 `# Unit N:標題` 一行)、`labs/`。固化 meta.json 時**依 `pipeline/prompts/concepts.md` 規格從 AGENDA 萃取 8-12 個概念填入 `concepts`**(name + desc,禁模板詞)——這是課程關聯自動計算的資料來源;萃取在此刻做掉,關聯腳本執行期就完全不需要 LLM。
+3. **程度分析**:依 `pipeline/prompts/assess.md` 分 ✅/❌/⬜ 三桶(引用原話),提議 agenda(單元數 = 洞聚類結果 6-12 + 整合單元)與課程關聯(讀 `courses/active/*/content/meta.json` 提議 relations)。
+4. **給使用者看,等回饋修改**。確認後先跑 `node pipeline/course-tool.js init <slug>`,再固化到 `courses/staging/<slug>/content/`: `DIAGNOSTIC.md`、`AGENDA.md`、`meta.json`(照 `pipeline/templates/`;slug 用英文 kebab-case),並建 `units/` 佔位檔、`labs/`。固化 meta.json 時**依 `pipeline/prompts/concepts.md` 規格從 AGENDA 萃取 8-12 個概念填入 `concepts`**。`course.json` 與 `state/` 由 course-tool 管理,生成 agent 不得改動。
 5. **平行生成講義**:用 `pipeline/prompts/unit-writer.md` 模板派 agent,每個 agent 3-4 個單元、同一則訊息平行發出。格式重點:markdown-it 可渲染(禁 `!!!`)、`## Lab`、`## 自答題` + `<!-- qN keywords: ... -->` 緊貼題目上一行。
-6. **驗收**:跑 `./pipeline/verify.sh <slug>`;不過的單元帶評語重派。過了把 meta.json 的 `status` 改成 `active`,接著跑 `node pipeline/relations.js` 更新自動關聯(純本機,需 Ollama;不在就會自行跳過)。瀏覽器開 `http://127.0.0.1:4600/reader.html?course=<slug>&unit=01-….md` 抽讀確認渲染正常。
+6. **驗收與啟用**:先跑 `node pipeline/activity-tool.js merge courses/staging/<slug>/content/_activity-fragments --out courses/staging/<slug>/content/activities.json --content courses/staging/<slug>/content`(沒有 fragment 就保留空 manifest),再跑 `./pipeline/verify.sh <slug>`。通過後執行 `node pipeline/course-tool.js activate <slug>`；課程是否 active 由 bundle 位於 `courses/active/` 決定,不再寫 meta.status。接著跑 `node pipeline/relations.js`。
 7. **診斷永久留檔**:DIAGNOSTIC.md 不得刪除——reader 的 AI 助教與自答題批改都靠它個人化。
 
 ## 必停點
@@ -24,7 +24,10 @@ description: 在本專案建立一門個人化課程(診斷 → 程度分析+課
 
 ## 原則
 
-- `courses/` 對一般 app 流程是唯讀;學習狀態都在 `app/data/learning.db`,不要往課程目錄寫狀態。唯一例外是 course lifecycle 的封存／還原會原子更新 `meta.json.status`（`active ↔ archived`），不搬移或刪除 source。
+- 每門課是 course bundle:`content/` 唯讀、`state/state.sqlite` 保存該課狀態。生成流程只能更新 staging `content/`,不得刪除或改寫 active bundle 的 `state/`。
+- 封存／還原由 `courses/active/<slug> ↔ courses/archived/<slug>` atomic rename 表達；不要手改 meta.status。
+- Activity 定義在 `content/activities.json`,todo/doing/done 只存在 state.sqlite；不得把 mutable state 寫進 JSON 或 markdown checkbox。
+- 自訂呈現是 optional course-local plugin：在 `content/views.json` 宣告；課程共用導覽用 `courseDrawer` 指向 view id，特定內文位置才用 Markdown 的 ```` ```view ```` fence。HTML 放 `content/views/`，只能走 Reader bridge，不能直接 fetch API；一般圖解仍用 Mermaid。
 - 講義品質紅線:教為什麼、點名修正誤解(引用原話)、Lab 可執行或給閱讀任務、失敗案例並重。
 - 不確定關聯就不要硬連;`relations` 是手動宣告的權威邊,寧缺勿濫(自動候選邊由概念比對腳本另行產生,兩者分開存)。
 - **講義或課綱大幅改動時,同一個 session 要順手依 `pipeline/prompts/concepts.md` 重萃取 concepts**——概念過期會讓自動關聯失準。
