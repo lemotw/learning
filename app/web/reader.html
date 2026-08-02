@@ -243,7 +243,8 @@ function installReadingFeedback(root) {
   hint.textContent = '雙點右側內容或圓點：閱讀中 → 完成；長按／拖曳仍可複製文字';
   (root.querySelector('.unit-state-bar') || root.querySelector('h1'))?.after(hint);
 
-  const interactive = 'a, button, input, select, textarea, pre, code, table, img, svg, .mermaid, .course-view-shell';
+  // 連結與真正的控制元件不攔；code／pre／table 仍可雙點，拖曳或長按選字則照常。
+  const interactive = 'a, button, input, select, textarea, img, svg, .mermaid, .course-view-shell';
   function blockAt(target) {
     if (!(target instanceof Element)) return null;
     const nativeHaptic = target.closest('.reading-ios-haptic');
