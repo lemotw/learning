@@ -86,6 +86,32 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .unit-state-bar { display: flex; align-items: center; gap: 7px; margin: 10px 0 18px; }
 .unit-state-bar button { padding: 3px 9px; font-size: 12px; }
 
+/* Reader session 內的段落回饋，不代表持久閱讀進度。 */
+.reading-feedback-hint { margin: -8px 0 16px; color: var(--fg-dim); font-size: 12px; }
+.reading-block {
+  position: relative; margin: 1.8em -10px 0; padding: 10px 12px 14px 38px;
+  border-left: 3px solid transparent; border-radius: 8px; background: transparent;
+  touch-action: manipulation;
+  transition: background-color .2s ease, border-color .2s ease;
+}
+.reading-block-h2 { margin-top: 2.2em; }
+.reading-block-intro { margin-top: 0; }
+.reading-block > .reading-block-marker + * { margin-top: 0; }
+.reading-block > :last-child { margin-bottom: 0; }
+.reading-block.is-reading { border-left-color: var(--warn); background: rgba(224,164,88,.09); }
+.reading-block.is-done { border-left-color: var(--ok); background: rgba(76,175,125,.08); }
+.reading-block-marker {
+  position: absolute; left: 7px; top: 11px; display: grid; place-items: center;
+  width: 24px; height: 24px; padding: 0; border-color: transparent; border-radius: 50%;
+  color: var(--fg-dim); background: transparent; font-size: 17px; line-height: 1;
+  touch-action: manipulation;
+}
+.reading-block-marker:hover,
+.reading-block-marker:focus-visible { border-color: var(--accent); outline: none; }
+.reading-block.is-reading > .reading-block-marker { color: var(--warn); }
+.reading-block.is-done > .reading-block-marker { color: var(--ok); }
+@media (prefers-reduced-motion: reduce) { .reading-block { transition: none; } }
+
 /* Unit activity checklist */
 .activity-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 14px; margin: 8px 0; }
 .activity-head { display: flex; align-items: center; gap: 8px; min-width: 0; }

@@ -183,6 +183,7 @@ async function load() {
     const file = href.split('/').pop();
     a.href = `reader.html?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(file)}`;
   });
+  installReadingFeedback(mdEl);
   renderStateButtons(unitData.state);
   setupNav();
   renderActivities();
@@ -202,6 +203,134 @@ function installUnitStateBar(root) {
     <button data-state="reading">閱讀中</button>
     <button data-state="done">完成</button>`;
   heading.after(bar);
+}
+
+// 只在目前頁面的 DOM 保存段落狀態；不修改 Markdown，也不呼叫 API。
+function installReadingFeedback(root) {
+  const nodes = [...root.children];
+  const sections = [];
+  let section = null;
+
+  function begin(node, kind, title) {
+    section = document.createElement('section');
+    section.className = `reading-block reading-block-${kind}`;
+    section.dataset.readingState = 'unread';
+    section.dataset.title = title;
+    const marker = document.createElement('button');
+    marker.type = 'button';
+    marker.className = 'reading-block-marker';
+    marker.innerHTML = '<span aria-hidden="true">○</span>';
+    root.insertBefore(section, node);
+    section.append(marker, node);
+    sections.push(section);
+    paintReadingBlock(section);
+  }
+
+  for (const node of nodes) {
+    if (node.matches('h1, .unit-state-bar')) { section = null; continue; }
+    if (node.matches('h2, h3')) {
+      begin(node, node.tagName.toLowerCase(), node.textContent.trim() || '本節');
+    } else if (!section) {
+      begin(node, 'intro', '導言');
+    } else {
+      section.append(node);
+    }
+  }
+  if (!sections.length) return;
+
+  const hint = document.createElement('div');
+  hint.className = 'reading-feedback-hint';
+  hint.textContent = '雙點段落或圓點：閱讀中 → 完成（重新整理後重設）';
+  (root.querySelector('.unit-state-bar') || root.querySelector('h1'))?.after(hint);
+
+  const interactive = 'a, button, input, select, textarea, pre, code, table, img, svg, .mermaid, .course-view-shell';
+  function blockAt(target) {
+    if (!(target instanceof Element)) return null;
+    const marker = target.closest('.reading-block-marker');
+    if (marker) return marker.closest('.reading-block');
+    if (target.closest(interactive)) return null;
+    return target.closest('.reading-block');
+  }
+
+  let touchStart = null;
+  let previousTap = null;
+  let suppressDoubleClickUntil = 0;
+
+  root.addEventListener('pointerdown', event => {
+    if (event.pointerType === 'mouse') return;
+    const block = blockAt(event.target);
+    touchStart = block ? {
+      id: event.pointerId, block, x: event.clientX, y: event.clientY, at: performance.now(),
+    } : null;
+  }, { passive: true });
+
+  root.addEventListener('pointerup', event => {
+    if (!touchStart || touchStart.id !== event.pointerId) return;
+    const start = touchStart;
+    touchStart = null;
+    const now = performance.now();
+    if (now - start.at > 320 || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 14) {
+      previousTap = null;
+      return;
+    }
+    if (previousTap && previousTap.block === start.block && now - previousTap.at < 400
+      && Math.hypot(event.clientX - previousTap.x, event.clientY - previousTap.y) < 30) {
+      event.preventDefault();
+      advanceReadingBlock(start.block);
+      previousTap = null;
+      suppressDoubleClickUntil = performance.now() + 700;
+    } else {
+      previousTap = { block: start.block, x: event.clientX, y: event.clientY, at: now };
+    }
+  }, { passive: false });
+
+  root.addEventListener('pointercancel', () => { touchStart = null; });
+
+  root.addEventListener('dblclick', event => {
+    if (performance.now() < suppressDoubleClickUntil) { event.preventDefault(); return; }
+    const block = blockAt(event.target);
+    if (!block) return;
+    const marker = event.target instanceof Element && event.target.closest('.reading-block-marker');
+    // 桌面雙擊文字仍可選字；雙擊圓點或段落空白才改狀態。
+    if (!marker && window.getSelection()?.toString().trim()) return;
+    event.preventDefault();
+    advanceReadingBlock(block);
+  });
+
+  root.addEventListener('keydown', event => {
+    if (!['Enter', ' '].includes(event.key) || !(event.target instanceof Element)) return;
+    const marker = event.target.closest('.reading-block-marker');
+    if (!marker) return;
+    event.preventDefault();
+    advanceReadingBlock(marker.closest('.reading-block'));
+  });
+}
+
+function paintReadingBlock(block) {
+  const state = block.dataset.readingState || 'unread';
+  const icon = { unread: '○', reading: '◐', done: '✓' }[state];
+  const label = { unread: '未開始', reading: '閱讀中', done: '完成' }[state];
+  block.classList.toggle('is-reading', state === 'reading');
+  block.classList.toggle('is-done', state === 'done');
+  const marker = block.querySelector(':scope > .reading-block-marker');
+  marker.querySelector('span').textContent = icon;
+  marker.title = `${block.dataset.title} · ${label}`;
+  marker.setAttribute('aria-label', `${block.dataset.title}：${label}`);
+}
+
+function advanceReadingBlock(block) {
+  const state = block.dataset.readingState || 'unread';
+  const next = state === 'unread' ? 'reading' : state === 'reading' ? 'done' : null;
+  if (!next) return;
+  block.dataset.readingState = next;
+  paintReadingBlock(block);
+  block.animate?.(
+    [{ boxShadow: '0 0 0 0 rgba(124,111,240,.32)' }, { boxShadow: '0 0 0 5px rgba(124,111,240,0)' }],
+    { duration: 420, easing: 'ease-out' }
+  );
+  try {
+    navigator.vibrate?.(next === 'done' ? [18, 32, 26] : 14);
+  } catch { /* vibration 並非所有手機都支援 */ }
 }
 
 function parseViewDirective(source) {
