@@ -22,23 +22,29 @@
 </head>
 <body>
 <div class="topbar">
-  <a id="backLink" href="./">← 課程</a>
-  <span id="crumb" class="dim crumb"></span>
+  <a id="homeLink" href="./">⌂ <span class="nav-label">學習中心</span></a>
+  <button id="courseViewToggle" hidden>🧭 <span class="nav-label">課程導覽</span></button>
+  <span id="crumb" class="dim crumb"><a id="courseLink"></a><span id="unitCrumb"></span></span>
   <span id="archiveBadge" class="badge archived" hidden>已封存 · 唯讀</span>
   <span class="spacer"></span>
-  <span class="dim hide-sm">狀態:</span>
-  <button data-state="unread">未讀</button>
-  <button data-state="reading">閱讀中</button>
-  <button data-state="done">完成</button>
-  <span class="hide-sm" style="width:12px"></span>
   <button id="prevBtn">‹ 上一</button>
   <button id="nextBtn">下一 ›</button>
-  <button id="chatToggle">💬 助教</button>
+  <button id="chatToggle">💬 <span class="nav-label">助教</span></button>
 </div>
 
 <div class="layout">
+  <aside class="coursepanel collapsed" id="coursepanel">
+    <header>
+      <div><b>課程導覽</b><div id="courseViewTitle" class="dim"></div></div>
+      <span class="spacer"></span>
+      <button id="courseViewClose" title="關閉">✕</button>
+    </header>
+    <div id="courseViewHost" class="course-view-host"></div>
+  </aside>
+
   <div class="content">
     <article id="md" class="md"></article>
+    <section id="activities" class="md activity-section" style="padding-top:0"></section>
     <section id="selfcheck" class="md" style="padding-top:0"></section>
   </div>
 
@@ -72,9 +78,6 @@
 <script>
 const qs = new URLSearchParams(location.search);
 const course = qs.get('course'), unit = qs.get('unit');
-// 回上一頁要回到這門課的專頁,不是首頁。講義是開在新分頁的,沒有 history 可退,
-// 只能自己組 hash;course 缺了(不該發生)才退回首頁。
-document.getElementById('backLink').href = course ? `./#/c/${encodeURIComponent(course)}` : './';
 const mdi = window.markdownit({ html: false, linkify: true, breaks: false,
   highlight: (str, lang) => {
     if (lang === 'mermaid') return '<div class="mermaid">' + str.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>';
@@ -85,6 +88,9 @@ mermaid.initialize({ startOnLoad: false, theme: 'dark' });
 
 let unitData = null;
 let OFFLINE = false; // SW 回快取(X-Sw-Cache: hit)= 連不上 Mac
+const VIEW_PROTOCOL = 1;
+const viewInstances = new Map(); // iframe.contentWindow → instance
+let courseActivitiesPromise = null;
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -99,7 +105,7 @@ function applyArchiveUI() {
   if (!isArchived()) return;
   const badge = document.getElementById('archiveBadge');
   badge.hidden = false;
-  document.querySelectorAll('.topbar [data-state]').forEach(b => {
+  document.querySelectorAll('.unit-state-bar [data-state]').forEach(b => {
     b.disabled = true; b.title = '課程已封存，請先還原才能修改進度';
   });
   const send = document.getElementById('chatSend');
@@ -108,8 +114,8 @@ function applyArchiveUI() {
   ta.disabled = true; ta.placeholder = '課程已封存，請先還原才能詢問助教';
   document.getElementById('newChat').disabled = true;
   agentPick.disabled = true; modelPick.disabled = true;
-  document.querySelectorAll('#selfcheck textarea, #selfcheck button.primary').forEach(el => {
-    el.disabled = true; el.title = '課程已封存，請先還原才能作答';
+  document.querySelectorAll('#selfcheck textarea, #selfcheck button.primary, .activity-control').forEach(el => {
+    el.disabled = true; el.title = '課程已封存，請先還原才能修改';
   });
   document.querySelectorAll('#selfcheck .result').forEach(r => {
     if (!r.textContent) r.textContent = '課程已封存，可查看歷次作答';
@@ -129,30 +135,38 @@ function setOffline() {
 
 // 冪等;selfcheck 卡片是非同步長出來的,長完後需要再跑一次
 function applyOfflineUI() {
-  document.querySelectorAll('.topbar [data-state]').forEach(b => {
+  document.querySelectorAll('.unit-state-bar [data-state]').forEach(b => {
     b.disabled = true; b.title = '離線,需連上 Mac';
   });
   const send = document.getElementById('chatSend');
   send.disabled = true; send.title = '離線,需連上 Mac';
   const ta = document.getElementById('chatText');
   ta.disabled = true; ta.placeholder = '離線,需連上 Mac 才能使用助教';
-  document.querySelectorAll('#selfcheck button.primary').forEach(b => {
+  document.querySelectorAll('#selfcheck button.primary, .activity-control').forEach(b => {
     b.disabled = true; b.title = '離線,需連上 Mac';
   });
+  broadcastView({ type: 'view:writable', writable: false });
   document.querySelectorAll('#selfcheck .result').forEach(r => {
     if (!r.textContent) r.textContent = '離線,需連上 Mac 才能批改';
   });
 }
 
-function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 async function load() {
   unitData = await api(`api/unit?course=${encodeURIComponent(course)}&unit=${encodeURIComponent(unit)}`);
   document.title = unitData.courseTitle + ' · ' + unit;
-  document.getElementById('crumb').textContent = unitData.courseTitle + ' / ' + unit.replace(/\.md$/, '');
-  if (isArchived()) document.getElementById('backLink').href = `./#/archive/${encodeURIComponent(course)}`;
+  const courseLink = document.getElementById('courseLink');
+  courseLink.textContent = unitData.courseNavTitle || unitData.courseTitle;
+  courseLink.href = isArchived() ? `./#/archive/${encodeURIComponent(course)}` : `./#/c/${encodeURIComponent(course)}`;
+  const unitLabel = unit.replace(/\.md$/, '').replace(/^(\d+)-/, '$1 ').replaceAll('-', ' ')
+    .replace(/\b[a-z]/g, c => c.toUpperCase());
+  document.getElementById('unitCrumb').textContent = ` / ${unitLabel}`;
   const mdEl = document.getElementById('md');
   mdEl.innerHTML = mdi.render(unitData.md);
+  installUnitStateBar(mdEl);
+  setupCourseDrawer();
+  mountViews(mdEl);
   mermaid.run({ querySelector: '#md .mermaid' }).catch(()=>{});
   // $$ 數學式(fundamental-analysis 等課程使用)
   if (window.renderMathInElement) renderMathInElement(mdEl, {
@@ -171,14 +185,168 @@ async function load() {
   });
   renderStateButtons(unitData.state);
   setupNav();
+  renderActivities();
   renderSelfcheck().then(applyArchiveUI);
   applyArchiveUI();
   // 選單要先建好,loadChatHistory 才有辦法把它還原成該段對話用的 agent
   loadAgents().then(loadChatHistory);
 }
 
+function installUnitStateBar(root) {
+  const heading = root.querySelector('h1');
+  if (!heading) return;
+  const bar = document.createElement('div');
+  bar.className = 'unit-state-bar';
+  bar.innerHTML = `<span class="dim">本單元：</span>
+    <button data-state="unread">未讀</button>
+    <button data-state="reading">閱讀中</button>
+    <button data-state="done">完成</button>`;
+  heading.after(bar);
+}
+
+function parseViewDirective(source) {
+  const text = String(source || '').trim();
+  if (!text) throw new Error('view directive 不可為空');
+  let id;
+  if (text.startsWith('{')) {
+    const cfg = JSON.parse(text);
+    if (Object.keys(cfg).some(k => !['id', 'view'].includes(k))) throw new Error('view directive 有未知欄位');
+    id = cfg.id || cfg.view;
+  } else id = text;
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(id || '')) throw new Error('view id 無效');
+  return { id };
+}
+
+function broadcastView(message) {
+  for (const instance of viewInstances.values()) {
+    instance.frame.contentWindow?.postMessage({ protocol: VIEW_PROTOCOL, ...message }, '*');
+  }
+}
+
+function updateLocalActivityState(activityId, state, updatedAt = null) {
+  if (unitData?.activities) {
+    const activity = unitData.activities.find(a => a.id === activityId);
+    if (activity) { activity.state = state; activity.updatedAt = updatedAt; }
+  }
+  document.querySelectorAll(`[data-activity-id="${CSS.escape(activityId)}"]`).forEach(el => {
+    if (el.matches('select')) el.value = state;
+    const card = el.closest('.activity-card');
+    const dot = card?.querySelector('.activity-state-dot');
+    if (dot) dot.className = `activity-state-dot st-${state}`;
+  });
+}
+
+async function initView(instance) {
+  try {
+    courseActivitiesPromise ||= api(`api/v1/courses/${encodeURIComponent(course)}/activities`);
+    const [payload, viewPayload] = await Promise.all([
+      courseActivitiesPromise,
+      api(`api/view-data?course=${encodeURIComponent(course)}&view=${encodeURIComponent(instance.definition.id)}`),
+    ]);
+    instance.activities = new Map(payload.activities.map(a => [a.id, a]));
+    instance.shell.querySelector('.view-status').hidden = true;
+    instance.frame.contentWindow.postMessage({
+      protocol: VIEW_PROTOCOL,
+      type: 'view:init',
+      course,
+      unit,
+      surface: instance.surface,
+      view: instance.definition,
+      writable: payload.writable && !OFFLINE,
+      revision: payload.revision,
+      activities: payload.activities,
+      data: viewPayload.data,
+    }, '*');
+  } catch (e) {
+    instance.shell.classList.add('view-error');
+    instance.shell.querySelector('.view-status').textContent = `View 載入失敗：${e.message}`;
+  }
+}
+
+function mountView(definition, shell, surface = 'inline') {
+  shell.innerHTML = `<div class="view-status dim">載入 ${esc(definition.title)}…</div>`;
+  const frame = document.createElement('iframe');
+  frame.className = 'course-view-frame';
+  frame.title = definition.title;
+  frame.setAttribute('sandbox', 'allow-scripts');
+  if (surface === 'drawer') frame.style.height = '100%';
+  else frame.style.height = `${definition.height || 720}px`;
+  frame.src = `course-view/${encodeURIComponent(course)}/${encodeURIComponent(definition.id)}.html`;
+  shell.appendChild(frame);
+  const instance = { frame, shell, definition, surface, activities: new Map() };
+  frame.addEventListener('load', () => {
+    viewInstances.set(frame.contentWindow, instance);
+    initView(instance);
+  });
+}
+
+function setupCourseDrawer() {
+  const definition = (unitData.views || []).find(v => v.id === unitData.courseDrawer);
+  if (!definition) return;
+  document.getElementById('courseViewToggle').hidden = false;
+  document.getElementById('courseViewTitle').textContent = definition.title;
+  const shell = document.createElement('div');
+  shell.className = 'course-view-shell drawer';
+  document.getElementById('courseViewHost').replaceChildren(shell);
+  mountView(definition, shell, 'drawer');
+}
+
+function mountViews(root) {
+  for (const code of root.querySelectorAll('pre > code.language-view')) {
+    const pre = code.parentElement;
+    try {
+      const config = parseViewDirective(code.textContent);
+      const definition = (unitData.views || []).find(v => v.id === config.id);
+      if (!definition) throw new Error(`課程沒有宣告 view「${config.id}」`);
+      const shell = document.createElement('div');
+      shell.className = 'course-view-shell';
+      pre.replaceWith(shell);
+      mountView(definition, shell, 'inline');
+    } catch (e) {
+      const error = document.createElement('div');
+      error.className = 'card view-error'; error.textContent = `View directive 無效：${e.message}`;
+      pre.replaceWith(error);
+    }
+  }
+}
+
+window.addEventListener('message', async event => {
+  const instance = viewInstances.get(event.source), message = event.data;
+  if (!instance || !message || message.protocol !== VIEW_PROTOCOL || typeof message.type !== 'string') return;
+  if (message.type === 'view:resize') {
+    const height = Math.max(240, Math.min(1600, Number(message.height) || 0));
+    if (height && instance.surface !== 'drawer') instance.frame.style.height = `${Math.ceil(height)}px`;
+    return;
+  }
+  if (message.type === 'view:open-activity') {
+    const activity = instance.activities.get(message.activityId);
+    if (activity?.url) window.open(activity.url, '_blank', 'noopener');
+    return;
+  }
+  if (message.type !== 'view:set-state') return;
+  const requestId = message.requestId || null;
+  try {
+    if (OFFLINE || isArchived()) throw new Error(OFFLINE ? '目前離線' : '課程已封存');
+    if (!['todo', 'doing', 'done'].includes(message.state)) throw new Error('state 無效');
+    if (!instance.activities.has(message.activityId)) throw new Error('activity 不存在');
+    const result = await api(`api/v1/courses/${encodeURIComponent(course)}/activities/${encodeURIComponent(message.activityId)}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ state: message.state }),
+    });
+    for (const current of viewInstances.values()) {
+      const activity = current.activities.get(message.activityId);
+      if (activity) { activity.state = result.activity.state; activity.updatedAt = result.activity.updatedAt; }
+    }
+    updateLocalActivityState(message.activityId, result.activity.state, result.activity.updatedAt);
+    broadcastView({ type: 'view:state', requestId, activityId: message.activityId,
+      state: result.activity.state, updatedAt: result.activity.updatedAt });
+  } catch (e) {
+    instance.frame.contentWindow.postMessage({ protocol: VIEW_PROTOCOL, type: 'view:error', requestId,
+      activityId: message.activityId, error: e.message }, '*');
+  }
+});
+
 function renderStateButtons(state) {
-  document.querySelectorAll('.topbar [data-state]').forEach(b => {
+  document.querySelectorAll('.unit-state-bar [data-state]').forEach(b => {
     b.classList.toggle('active', b.dataset.state === state);
     b.disabled = !!isArchived();
     b.onclick = async () => {
@@ -197,6 +365,53 @@ function setupNav() {
   const prev = document.getElementById('prevBtn'), next = document.getElementById('nextBtn');
   prev.disabled = i <= 0; next.disabled = i < 0 || i >= files.length - 1;
   prev.onclick = () => go(files[i-1]); next.onclick = () => go(files[i+1]);
+}
+
+// ---------- 本單元 Activity／任務 ----------
+function renderActivities() {
+  const host = document.getElementById('activities');
+  const list = unitData.activities || [];
+  if (!list.length) { host.innerHTML = ''; return; }
+  const stateLabel = { todo: '未做', doing: '進行中', done: '完成' };
+  const roleLabel = { anchor: 'Anchor', practice: '練習', extension: '延伸' };
+  host.innerHTML = `<h2>本單元任務</h2><p class="dim">只記錄未做、進行中、完成三種狀態。</p>`;
+  for (const a of list) {
+    const card = document.createElement('div');
+    card.className = 'activity-card';
+    card.innerHTML = `<div class="activity-head">
+      <span class="activity-state-dot st-${esc(a.state)}"></span>
+      ${a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener"><b>${esc(a.title)}</b> ↗</a>` : `<b>${esc(a.title)}</b>`}
+      <span class="kw">${esc(roleLabel[a.role] || a.role)}</span>
+      ${a.metadata && a.metadata.difficulty ? `<span class="kw">${esc(a.metadata.difficulty)}</span>` : ''}
+      <span class="spacer"></span>
+      <select class="activity-control activity-state" aria-label="任務狀態">
+        ${Object.entries(stateLabel).map(([v,l]) => `<option value="${v}"${a.state === v ? ' selected' : ''}>${l}</option>`).join('')}
+      </select>
+    </div>`;
+    card.dataset.activityId = a.id;
+    const state = card.querySelector('.activity-state');
+    state.dataset.activityId = a.id;
+    state.onchange = async () => {
+      if (OFFLINE || isArchived()) return;
+      state.disabled = true;
+      try {
+        const result = await api(`api/v1/courses/${encodeURIComponent(course)}/activities/${encodeURIComponent(a.id)}`, {
+          method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ state: state.value }) });
+        a.state = result.activity.state;
+        a.updatedAt = result.activity.updatedAt;
+        for (const current of viewInstances.values()) {
+          const activity = current.activities.get(a.id);
+          if (activity) { activity.state = a.state; activity.updatedAt = a.updatedAt; }
+        }
+        updateLocalActivityState(a.id, a.state, a.updatedAt);
+        broadcastView({ type: 'view:state', activityId: a.id, state: a.state, updatedAt: a.updatedAt });
+      } catch (e) { state.value = a.state; alert('更新任務失敗：' + e.message); }
+      state.disabled = false;
+    };
+    host.appendChild(card);
+  }
+  if (OFFLINE) applyOfflineUI();
+  if (isArchived()) applyArchiveUI();
 }
 
 // ---------- 自答題 ----------
@@ -259,8 +474,32 @@ async function renderSelfcheck() {
 // ---------- 助教對話 ----------
 const chatlog = document.getElementById('chatlog');
 const panel = document.getElementById('chatpanel');
-document.getElementById('chatToggle').onclick = () => panel.classList.toggle('collapsed');
-document.getElementById('chatClose').onclick = () => panel.classList.add('collapsed');
+const coursePanel = document.getElementById('coursepanel');
+const courseViewToggle = document.getElementById('courseViewToggle');
+const chatToggle = document.getElementById('chatToggle');
+function closeCoursePanel() {
+  coursePanel.classList.add('collapsed');
+  courseViewToggle.classList.remove('active');
+}
+function closeChatPanel() {
+  panel.classList.add('collapsed');
+  chatToggle.classList.remove('active');
+  if (panel.classList.contains('full')) setFull(false);
+}
+courseViewToggle.onclick = () => {
+  const opening = coursePanel.classList.contains('collapsed');
+  if (opening) closeChatPanel();
+  coursePanel.classList.toggle('collapsed', !opening);
+  courseViewToggle.classList.toggle('active', opening);
+};
+document.getElementById('courseViewClose').onclick = closeCoursePanel;
+chatToggle.onclick = () => {
+  const opening = panel.classList.contains('collapsed');
+  if (opening) closeCoursePanel();
+  panel.classList.toggle('collapsed', !opening);
+  chatToggle.classList.toggle('active', opening);
+};
+document.getElementById('chatClose').onclick = closeChatPanel;
 
 // 全螢幕對話。上一/下一單元是整頁重新載入,狀態記在 localStorage 才不會每次都要重按。
 const fullBtn = document.getElementById('chatFull');
@@ -273,7 +512,9 @@ setFull((() => { try { return localStorage.getItem('chatFull') === '1'; } catch 
 fullBtn.onclick = () => setFull(!panel.classList.contains('full'));
 document.addEventListener('keydown', (e) => {
   // 全螢幕蓋住了 topbar,沒有 Esc 就只剩那顆縮回鈕可按
-  if (e.key === 'Escape' && panel.classList.contains('full')) setFull(false);
+  if (e.key !== 'Escape') return;
+  if (panel.classList.contains('full')) setFull(false);
+  else if (!coursePanel.classList.contains('collapsed')) closeCoursePanel();
 });
 
 // 串流時只有「已經貼在底部」才跟著往下捲。

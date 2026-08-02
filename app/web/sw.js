@@ -2,13 +2,13 @@
  * 快取策略:
  *   - shell(html/css/pwa.js):stale-while-revalidate,自動跟上新版
  *   - vendor:cache-first;換 vendor 檔或改 precache 清單時,手動 bump CACHE_VERSION
- *   - GET api/*:network-first(4s timeout),斷線時退快取並加 X-Sw-Cache: hit 標頭
+ *   - GET api/* 與 course-view/*:network-first(4s timeout),斷線時退快取
  *   - 非 GET(進度/批改/助教 SSE):完全不攔,原生走網路
  * 路徑一律相對 scope,根路徑與 /learning/ 子路徑部署都適用。
  */
 'use strict';
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v4';
 const STATIC_CACHE = 'learning-static-' + CACHE_VERSION;
 const CONTENT_CACHE = 'learning-content';
 
@@ -61,7 +61,7 @@ self.addEventListener('fetch', (event) => {
   const scope = self.registration.scope; // 以 '/' 結尾
   if (!req.url.startsWith(scope)) return;
   const rel = req.url.slice(scope.length).split('?')[0];
-  if (rel.startsWith('api/')) event.respondWith(apiNetworkFirst(req));
+  if (rel.startsWith('api/') || rel.startsWith('course-view/')) event.respondWith(apiNetworkFirst(req));
   else event.respondWith(staticServe(event, req, rel));
 });
 

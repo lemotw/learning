@@ -145,6 +145,21 @@
     padding: 1px 7px; font-size: 10.5px; font-weight: 700; margin-right: 5px; }
   .archive-note { color: var(--muted); font-size: 12.5px; margin: -4px 0 12px; }
 
+  /* 跨課 Activity／練習清單 */
+  .activity-tools { display: flex; gap: 8px; margin-bottom: 12px; }
+  .activity-tools input, .activity-tools select { font: inherit; font-size: 13px; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px; }
+  .activity-tools input { flex: 1; min-width: 120px; }
+  .global-activity { display: flex; gap: 10px; align-items: center; padding: 10px 15px; border-top: 1px solid var(--line); }
+  .global-activity:first-child { border-top: 0; }
+  .global-activity .ga-main { flex: 1; min-width: 0; }
+  .global-activity a { color: var(--text); text-decoration: none; font-size: 13.5px; font-weight: 650; }
+  .global-activity a:hover { color: var(--accent); }
+  .global-activity .ga-meta { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+  .ga-state { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 8px; color: var(--muted); background: var(--seg-empty); }
+  .ga-state.done { color: var(--done); background: var(--done-soft); }
+  .ga-state.doing { color: var(--reading); background: var(--reading-soft); }
+
   .cy-wrap { position: relative; }
   #cy { height: calc(100vh - 220px); min-height: 460px; border: 1px solid var(--line);
     border-radius: 16px; background: var(--panel); }
@@ -231,10 +246,11 @@
 <script>
 const CYCLE = { unread: 'reading', reading: 'done', done: 'unread' };
 const LABEL = { unread: '未讀', reading: '閱讀中', done: '已讀' };
-let COURSES = [], ARCHIVED = [], REDO = [];
+let COURSES = [], ARCHIVED = [], REDO = [], ACTIVITY_CATALOG = [];
 let OFFLINE = false; // 由 load() 依 SW 的 X-Sw-Cache 標頭判定
 let GRAPH = { edges: [] }; // /api/graph 的合併邊(手動 + 自動候選)
 let cy = null; // 圖譜 lazy init
+let waitingForIndex = false;
 
 const esc = v => String(v ?? '').replace(/[&<>'"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c]));
 const readerUrl = (c, u) => `reader.html?course=${encodeURIComponent(c)}&unit=${encodeURIComponent(u)}`;
@@ -250,6 +266,7 @@ function route() {
   if (h.startsWith('#/archive/')) return { page: 'archive-detail', slug: decodeURIComponent(h.slice(10)) };
   if (h === '#/archive') return { page: 'archive' };
   if (h === '#/graph') return { page: 'graph' };
+  if (h === '#/activities') return { page: 'activities' };
   if (h === '#/scoring') return { page: 'scoring' };
   return { page: 'overview' };
 }
@@ -259,6 +276,7 @@ function tabsHTML(cur) {
     <button class="hub-tab ${cur === 'progress' ? 'on' : ''}" data-nav="">課程</button>
     <button class="hub-tab ${cur === 'archive' ? 'on' : ''}" data-nav="#/archive">封存${ARCHIVED.length ? ` (${ARCHIVED.length})` : ''}</button>
     <button class="hub-tab ${cur === 'graph' ? 'on' : ''}" data-nav="#/graph">圖譜</button>
+    <button class="hub-tab ${cur === 'activities' ? 'on' : ''}" data-nav="#/activities">練習${ACTIVITY_CATALOG.length ? ` (${ACTIVITY_CATALOG.filter(a => a.state === 'done').length}/${ACTIVITY_CATALOG.length})` : ''}</button>
     <button class="hub-tab ${cur === 'scoring' ? 'on' : ''}" data-nav="#/scoring">計分比較</button>
     ${OFFLINE ? '<span class="off-badge">離線瀏覽</span>' : ''}
   </div>`;
@@ -282,9 +300,10 @@ function overviewHTML() {
   const ordered = [...COURSES].sort((a, b) => lastTouch(b).localeCompare(lastTouch(a)));
   const rows = ordered.map(c => {
     const nx = nextUnit(c);
-    const nextLine = nx
+    const activityLine = c.activities && c.activities.total ? ` · 練習 ${c.activities.done}/${c.activities.total}` : '';
+    const nextLine = (nx
       ? `下一個:<span class="nx">${esc(nx.title.replace(/ ——.*$/, ''))}</span>`
-      : `<span class="nx-done">全部讀完 ✓</span>`;
+      : `<span class="nx-done">全部讀完 ✓</span>`) + activityLine;
     return `<button class="b-row" data-course="${esc(c.slug)}">
       <span class="b-main">
         <span class="b-name">${esc(c.title)}</span>
@@ -327,6 +346,7 @@ function detailHTML(slug) {
       <button class="course-action archive" type="button" data-archive="${esc(c.slug)}" ${OFFLINE ? 'disabled title="離線時不能變更課程狀態"' : ''}>封存課程</button></div>
     <div class="detail-meta">
       <span class="last-read">${last}</span>
+      ${c.activities && c.activities.total ? `<span class="tag">練習 ${c.activities.done}/${c.activities.total} · Anchor ${c.activities.anchorsDone}/${c.activities.anchorsTotal}</span>` : ''}
       ${(c.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('')}
     </div>
     <div class="detail-track">${c.units.map(u => `<div class="seg s-${u.state}"></div>`).join('')}</div>
@@ -407,6 +427,38 @@ function initArchiveSearch() {
       }
     }, 180);
   });
+}
+
+function activitiesHTML() {
+  return tabsHTML('activities') + `<div class="archive-head"><h2>跨課練習</h2><span class="detail-count">${ACTIVITY_CATALOG.length} 個資源</span></div>
+    <p class="archive-note">同一個 resource 即使出現在多門課也只列一次；封存課的完成歷史仍保留。</p>
+    <div class="activity-tools">
+      <input id="activitySearch" type="search" placeholder="搜尋題目或 resource…">
+      <select id="activityState"><option value="">全部狀態</option><option value="todo">未做</option><option value="doing">進行中</option><option value="done">完成</option></select>
+    </div>
+    <div class="panel-list" id="activityList"></div>`;
+}
+
+function renderActivityCatalog() {
+  const host = document.getElementById('activityList');
+  if (!host) return;
+  const query = (document.getElementById('activitySearch')?.value || '').trim().toLocaleLowerCase();
+  const state = document.getElementById('activityState')?.value || '';
+  const labels = { todo: '未做', doing: '進行中', done: '完成' };
+  const list = ACTIVITY_CATALOG.filter(a => (!state || a.state === state)
+    && (!query || `${a.title} ${a.resource}`.toLocaleLowerCase().includes(query)));
+  host.innerHTML = list.length ? list.map(a => `<div class="global-activity">
+    <span class="ga-state ${esc(a.state)}">${esc(labels[a.state] || a.state)}</span>
+    <div class="ga-main">${a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)} ↗</a>` : `<b>${esc(a.title)}</b>`}
+      <div class="ga-meta">${esc(a.resource)} · ${a.courses.map(c => `${courseTitle(c.course)}${c.status === 'archived' ? '(封存)' : ''}`).join('、')}</div>
+    </div>
+  </div>`).join('') : '<div class="empty">沒有符合條件的練習</div>';
+}
+
+function initActivityCatalog() {
+  document.getElementById('activitySearch')?.addEventListener('input', renderActivityCatalog);
+  document.getElementById('activityState')?.addEventListener('change', renderActivityCatalog);
+  renderActivityCatalog();
 }
 
 function graphHTML() {
@@ -840,35 +892,58 @@ function render() {
   const r = route();
   cy = null; // 換頁就丟掉舊實例
   if (cy2) { cy2.destroy(); cy2 = null; }
-  document.getElementById('main').classList.toggle('wide', r.page === 'graph' || r.page === 'scoring');
+  document.getElementById('main').classList.toggle('wide', r.page === 'graph' || r.page === 'scoring' || r.page === 'activities');
   document.getElementById('view').innerHTML =
     r.page === 'detail' ? detailHTML(r.slug)
     : r.page === 'archive-detail' ? archiveDetailHTML(r.slug)
     : r.page === 'archive' ? archiveHTML()
     : r.page === 'graph' ? graphHTML()
+    : r.page === 'activities' ? activitiesHTML()
     : r.page === 'scoring' ? scoringHTML()
     : overviewHTML();
   if (r.page === 'archive') initArchiveSearch();
   if (r.page === 'graph') initGraph();
+  if (r.page === 'activities') initActivityCatalog();
   if (r.page === 'scoring') initScoring();
   const totalUnits = COURSES.reduce((n, c) => n + c.total, 0);
   document.getElementById('foot').textContent =
     COURSES.length ? `${COURSES.length} courses · ${totalUnits} units${ARCHIVED.length ? ` · ${ARCHIVED.length} archived` : ''}` : '';
 }
 
+async function refreshAfterIndexCheck(beforeProbe) {
+  if (waitingForIndex || OFFLINE) return;
+  try {
+    let s = await (await fetch('api/index/status', { cache: 'no-store' })).json();
+    waitingForIndex = true;
+    for (let i = 0; i < 30 && s.checking; i++) {
+      await new Promise(r => setTimeout(r, 300));
+      s = await (await fetch('api/index/status', { cache: 'no-store' })).json();
+    }
+    waitingForIndex = false;
+    // reconcile 可能在 status request 前就跑完；比較 probe timestamp 才不會漏掉這次更新。
+    if (!s.checking && beforeProbe && s.lastProbeAt !== beforeProbe) await load();
+  } catch { waitingForIndex = false; }
+}
+
 async function load() {
   try {
+    let beforeProbe = null;
+    try { beforeProbe = (await (await fetch('api/index/status', { cache: 'no-store' })).json()).lastProbeAt; } catch {}
     const rs = await Promise.all([
       fetch('api/courses', { cache: 'no-store' }),
       fetch('api/redo', { cache: 'no-store' }),
       fetch('api/graph', { cache: 'no-store' }),
       fetch('api/archive', { cache: 'no-store' }),
+      fetch('api/activity/catalog', { cache: 'no-store' }),
     ]);
     OFFLINE = rs.some(r => PWA.fromCache(r));
-    const [c, redo, g, archived] = await Promise.all(rs.map(r => r.json()));
-    COURSES = c; REDO = redo; GRAPH = g; ARCHIVED = archived;
+    const [c, redo, g, archived, activities] = await Promise.all(rs.map(r => r.json()));
+    COURSES = c; REDO = redo; GRAPH = g; ARCHIVED = archived; ACTIVITY_CATALOG = activities;
     render();
-    if (!OFFLINE) PWA.syncContent(COURSES); // fire-and-forget:把單元內容抓進離線快取
+    if (!OFFLINE) {
+      PWA.syncContent(COURSES); // fire-and-forget:把單元內容抓進離線快取
+      refreshAfterIndexCheck(beforeProbe);
+    }
   } catch (e) {
     document.getElementById('view').innerHTML =
       `<div class="error">讀不到課程資料(${esc(e.message)})。確認 learning-hub 服務有起來。</div>`;

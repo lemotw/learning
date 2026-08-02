@@ -11,8 +11,10 @@
   --err: #e06c75;
   --border: #2a3140;
   --radius: 10px;
+  --topbar-height: 49px;
 }
 * { box-sizing: border-box; }
+html { scroll-padding-top: calc(var(--topbar-height) + 12px); }
 body {
   margin: 0; background: var(--bg); color: var(--fg);
   font: 15px/1.75 -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
@@ -35,10 +37,13 @@ textarea {
 textarea:focus { outline: none; border-color: var(--accent); }
 
 .topbar {
-  position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 12px;
-  padding: 10px 18px; background: rgba(15,17,23,.92); backdrop-filter: blur(6px);
+  position: fixed; inset: 0 0 auto 0; height: var(--topbar-height); z-index: 10;
+  display: flex; align-items: center; gap: 12px;
+  padding: 7px 18px; background: rgba(15,17,23,.94); backdrop-filter: blur(6px);
   border-bottom: 1px solid var(--border); font-size: 14px;
 }
+.topbar .crumb a { color: var(--fg-dim); }
+.topbar .crumb a:hover { color: var(--accent2); }
 .spacer { flex: 1; }
 .badge {
   display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
@@ -63,6 +68,14 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .md th { background: var(--bg3); }
 .md img { max-width: 100%; }
 .md .mermaid { background: var(--bg2); border-radius: var(--radius); padding: 12px; text-align: center; overflow-x: auto; }
+.course-view-shell { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg2); overflow: hidden; }
+.course-view-frame { display: block; width: 100%; min-height: 240px; border: 0; background: var(--bg); transition: height .15s ease; }
+.course-view-shell.drawer { margin: 0; border: 0; border-radius: 0; height: 100%; display: flex; flex-direction: column; }
+.course-view-shell.drawer .course-view-frame { flex: 1; min-height: 0; }
+.course-view-host { flex: 1; min-height: 0; overflow: hidden; }
+.course-view-shell > .view-status { padding: 9px 13px; border-bottom: 1px solid var(--border); }
+.course-view-shell > .view-status[hidden] { display: none; }
+.view-error { color: var(--err); border-color: var(--err); }
 
 .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin: 14px 0; }
 .dim { color: var(--fg-dim); font-size: 13px; }
@@ -70,12 +83,38 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .verdict-redo { color: var(--err); font-weight: 700; }
 .kw { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 8px; border-radius: 999px; background: var(--bg3); border: 1px solid var(--border); font-size: 12px; }
 
-/* reader 版面:左內容右對話 */
-.layout { display: flex; min-height: calc(100vh - 45px); }
+.unit-state-bar { display: flex; align-items: center; gap: 7px; margin: 10px 0 18px; }
+.unit-state-bar button { padding: 3px 9px; font-size: 12px; }
+
+/* Unit activity checklist */
+.activity-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 14px; margin: 8px 0; }
+.activity-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.activity-head a { color: var(--fg); text-decoration: none; min-width: 0; }
+.activity-head a:hover { color: var(--accent); }
+.activity-state-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--fg-dim); flex: none; }
+.activity-state-dot.st-doing { background: #d97706; }
+.activity-state-dot.st-done { background: var(--ok); }
+.activity-control { background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 12px; }
+@media (max-width: 700px) {
+  .activity-head { flex-wrap: wrap; }
+  .activity-head .spacer { display: none; }
+}
+
+/* reader 版面:左課程導覽、中央內容、右助教 */
+.layout { display: flex; margin-top: var(--topbar-height); min-height: calc(100vh - var(--topbar-height)); }
 .content { flex: 1; min-width: 0; }
+.coursepanel {
+  width: 440px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--bg2);
+  display: flex; flex-direction: column; position: sticky; top: var(--topbar-height); height: calc(100vh - var(--topbar-height));
+}
+.coursepanel.collapsed { display: none; }
+.coursepanel > header { min-height: 48px; padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.coursepanel > header > div { min-width: 0; }
+.coursepanel > header b, .coursepanel > header .dim { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.coursepanel > header .dim { font-size: 11px; }
 .chatpanel {
   width: 380px; flex-shrink: 0; border-left: 1px solid var(--border); background: var(--bg2);
-  display: flex; flex-direction: column; position: sticky; top: 45px; height: calc(100vh - 45px);
+  display: flex; flex-direction: column; position: sticky; top: var(--topbar-height); height: calc(100vh - var(--topbar-height));
 }
 .chatpanel.collapsed { display: none; }
 /* 全螢幕對話:蓋掉 topbar(z-index 10),靠 header 的縮回鈕或 Esc 退出 */
@@ -123,20 +162,21 @@ textarea:focus { outline: none; border-color: var(--accent); }
 
 /* ---------- 手機版 ---------- */
 @media (max-width: 820px) {
+  :root { --topbar-height: 82px; }
   body { font-size: 15px; }
   button { padding: 6px 12px; } /* 觸控目標加大 */
-  .topbar { flex-wrap: wrap; gap: 6px 8px; padding: 8px 10px; position: static; }
-  .topbar .hide-sm { display: none; }
+  .topbar { flex-wrap: wrap; align-content: center; gap: 6px 8px; padding: 7px 10px; }
+  .topbar .hide-sm, .topbar .nav-label { display: none; }
   .topbar .crumb { flex: 1 1 100%; order: 10; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .md { padding: 18px 16px 60px; }
   .md h1 { font-size: 22px; }
   .layout { display: block; min-height: 0; }
-  /* 對話欄改全螢幕覆蓋層 */
-  .chatpanel {
+  /* 左右側欄在手機都改全螢幕覆蓋層 */
+  .coursepanel, .chatpanel {
     position: fixed; inset: 0; width: 100%; height: 100dvh; z-index: 50;
-    border-left: 0; top: 0;
+    border-left: 0; border-right: 0; top: 0;
   }
-  .chatpanel header { padding: 12px 14px; }
+  .coursepanel > header, .chatpanel header { padding: 12px 14px; }
   .chatinput textarea { min-height: 48px; }
   #chatFull { display: none; } /* 手機本來就是全螢幕覆蓋,這顆按鈕沒意義 */
 }
