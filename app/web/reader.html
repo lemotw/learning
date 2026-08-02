@@ -240,7 +240,7 @@ function installReadingFeedback(root) {
 
   const hint = document.createElement('div');
   hint.className = 'reading-feedback-hint';
-  hint.textContent = '雙點右側內容或圓點：閱讀中 → 完成；長按／拖曳仍可複製文字';
+  hint.textContent = '雙點內容：閱讀中 → 完成；跳到後段時會自動完成前段，長按／拖曳仍可複製';
   (root.querySelector('.unit-state-bar') || root.querySelector('h1'))?.after(hint);
 
   // 連結與真正的控制元件不攔；code／pre／table 仍可雙點，拖曳或長按選字則照常。
@@ -373,6 +373,18 @@ function advanceReadingBlock(block) {
   const state = block.dataset.readingState || 'unread';
   const next = state === 'unread' ? 'reading' : state === 'reading' ? 'done' : null;
   if (!next) return;
+
+  // 使用者直接開始後面的段落，代表本頁前面的內容已經走過；只推進前段，不碰後段。
+  if (next === 'reading') {
+    for (const earlier of block.parentElement.querySelectorAll(':scope > .reading-block')) {
+      if (earlier === block) break;
+      if (earlier.dataset.readingState !== 'done') {
+        earlier.dataset.readingState = 'done';
+        paintReadingBlock(earlier);
+      }
+    }
+  }
+
   block.dataset.readingState = next;
   paintReadingBlock(block);
   block.animate?.(
