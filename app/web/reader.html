@@ -259,6 +259,7 @@ function installReadingFeedback(root) {
   // 會產生 Taptic 回饋；第一下點擊後短暫把透明 switch 放到觸點，讓第二下是原生操作。
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
     || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const doubleTapWindow = 540;
   let iosHaptic = null;
   let iosHapticTimer = null;
   function clearIOSHaptic() {
@@ -267,7 +268,7 @@ function installReadingFeedback(root) {
     iosHaptic = null;
   }
   function armIOSHaptic(block, clientX, clientY) {
-    if (!isIOS) return;
+    if (!isIOS || block.dataset.readingState === 'done') return;
     clearIOSHaptic();
     const size = 88;
     const control = document.createElement('input');
@@ -280,7 +281,7 @@ function installReadingFeedback(root) {
     control.style.top = `${Math.max(0, Math.min(innerHeight - size, clientY - size / 2))}px`;
     block.prepend(control);
     iosHaptic = control;
-    iosHapticTimer = setTimeout(clearIOSHaptic, 540);
+    iosHapticTimer = setTimeout(clearIOSHaptic, doubleTapWindow);
   }
 
   let touchStart = null;
@@ -290,7 +291,11 @@ function installReadingFeedback(root) {
   root.addEventListener('pointerdown', event => {
     if (event.pointerType === 'mouse') return;
     const block = blockAt(event.target);
-    touchStart = block ? {
+    if (event.target instanceof Element && event.target.matches('.reading-ios-haptic')) {
+      // 第二下已落在 switch；暫停逾時計時，等 pointerup 完成原生 haptic。
+      clearTimeout(iosHapticTimer);
+    }
+    touchStart = block && block.dataset.readingState !== 'done' ? {
       id: event.pointerId, block, x: event.clientX, y: event.clientY, at: performance.now(),
     } : null;
   }, { passive: true });
@@ -302,9 +307,11 @@ function installReadingFeedback(root) {
     const now = performance.now();
     if (now - start.at > 320 || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 14) {
       previousTap = null;
+      clearIOSHaptic();
       return;
     }
-    if (previousTap && previousTap.block === start.block && now - previousTap.at < 450
+    if (previousTap && previousTap.block === start.block
+      && start.at - previousTap.at < doubleTapWindow
       && Math.hypot(event.clientX - previousTap.x, event.clientY - previousTap.y) < 44) {
       const usedNativeHaptic = event.target instanceof Element
         && event.target.matches('.reading-ios-haptic');
@@ -316,11 +323,19 @@ function installReadingFeedback(root) {
       setTimeout(clearIOSHaptic, 80);
     } else {
       previousTap = { block: start.block, x: event.clientX, y: event.clientY, at: now };
-      armIOSHaptic(start.block, event.clientX, event.clientY);
+      const pendingTap = previousTap;
+      // 等第一下的原生 click 完整結束後才放入 switch，避免第一下就誤觸 haptic。
+      setTimeout(() => {
+        if (previousTap === pendingTap) armIOSHaptic(start.block, event.clientX, event.clientY);
+      }, 0);
     }
   }, { passive: false });
 
-  root.addEventListener('pointercancel', () => { touchStart = null; clearIOSHaptic(); });
+  root.addEventListener('pointercancel', () => {
+    touchStart = null;
+    previousTap = null;
+    clearIOSHaptic();
+  });
 
   root.addEventListener('dblclick', event => {
     if (performance.now() < suppressDoubleClickUntil) { event.preventDefault(); return; }
